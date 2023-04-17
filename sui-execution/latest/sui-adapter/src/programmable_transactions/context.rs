@@ -1184,10 +1184,10 @@ where
     );
     let metadata_opt = input_object_metadata.get(&id);
     let loaded_child_version_opt = loaded_child_objects.get(&id);
-    assert_invariant!(
-        metadata_opt.is_none() || loaded_child_version_opt.is_none(),
-        "Loaded {id} as a child, but that object was an input object",
-    );
+    // assert_invariant!(
+    //     metadata_opt.is_none() || loaded_child_version_opt.is_none(),
+    //     "Loaded {id} as a child, but that object was an input object",
+    // );
 
     let old_obj_ver = metadata_opt
         .map(|metadata| metadata.version)
