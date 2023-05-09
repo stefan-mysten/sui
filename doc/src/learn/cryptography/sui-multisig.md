@@ -55,7 +55,7 @@ $ADDR_3     | $PK_3               | ed25519
 
 ## Step 2: Create a MultiSig address
 
-To create a MultiSig address, input a list of public keys to use for the MultiSig address and list their corresponding weights.
+To create a MultiSig address, input a list of public keys to use for the MultiSig address anda list their corresponding weights and the threshold.
 
 ```shell
 $SUI_BINARY keytool multi-sig-address --pks $PK_1 $PK_2 $PK_3 --weights 1 2 3 --threshold 3
@@ -123,6 +123,8 @@ MultiSig address: $MULTISIG_ADDRESS # Informational
 MultiSig parsed: $HUMAN_READABLE_STRUCT # Informational
 MultiSig serialized: $SERIALIZED_MULTISIG
 ```
+
+Note that only the signatures of the participating signers whose sum of weights `>=k` are needed. All public keys and their weights and the threshold that defined the MultiSig address are required to be provided. 
 
 ## Step 6: Execute a transaction with MultiSig
 

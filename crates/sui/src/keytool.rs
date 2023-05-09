@@ -132,9 +132,12 @@ pub enum KeyToolCommand {
         weights: Vec<WeightUnit>,
     },
 
-    /// Provides a list of signatures (`flag || sig || pk` encoded in Base64), threshold, a list of public keys.
-    /// Returns a valid MultiSig and its sender address. The result can be used as signature field for `sui client execute-signed-tx`.
-    /// The number of sigs must be greater than the threshold. The number of sigs must be smaller than the number of pks.
+    /// Provides a list of participating signatures (`flag || sig || pk` encoded in Base64),
+    /// threshold, a list of all public keys and a list of their weights that define the
+    /// MultiSig address. Returns a valid MultiSig signature and its sender address. The
+    /// result can be used as signature field for `sui client execute-signed-tx`. The sum
+    /// of weights of all signatures must be >= the threshold. The number of sigs must be
+    /// <= the number of pks.
     MultiSigCombinePartialSig {
         #[clap(long, multiple_occurrences = false, multiple_values = true)]
         sigs: Vec<Signature>,

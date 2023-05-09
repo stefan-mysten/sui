@@ -40,7 +40,7 @@ export interface Keypair {
 export function fromExportedKeypair(keypair: ExportedKeypair): Keypair {
   const secretKey = fromB64(keypair.privateKey);
   switch (keypair.schema) {
-    case 'ED25519':
+    case 'Ed25519':
       let pureSecretKey = secretKey;
       if (secretKey.length === LEGACY_PRIVATE_KEY_SIZE) {
         // This is a legacy secret key, we need to strip the public key bytes and only read the first 32 bytes

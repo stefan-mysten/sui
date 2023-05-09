@@ -45,7 +45,7 @@ export class Ed25519Keypair implements Keypair {
    * Get the key scheme of the keypair ED25519
    */
   getKeyScheme(): SignatureScheme {
-    return 'ED25519';
+    return 'Ed25519';
   }
 
   /**
@@ -137,7 +137,7 @@ export class Ed25519Keypair implements Keypair {
    */
   export(): ExportedKeypair {
     return {
-      schema: 'ED25519',
+      schema: 'Ed25519',
       privateKey: toB64(this.keypair.secretKey.slice(0, PRIVATE_KEY_SIZE)),
     };
   }

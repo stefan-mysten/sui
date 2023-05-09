@@ -9,7 +9,7 @@ import { Secp256k1PublicKey } from './secp256k1-publickey';
 /**
  * A keypair used for signing transactions.
  */
-export type SignatureScheme = 'ED25519' | 'Secp256k1';
+export type SignatureScheme = 'Ed25519' | 'Secp256k1' | 'Secp256r1' | 'MultiSig';
 
 /**
  * Pair of signature and corresponding public key
@@ -29,14 +29,19 @@ export type SignaturePubkeyPair = {
 export type SerializedSignature = string;
 
 export const SIGNATURE_SCHEME_TO_FLAG = {
-  ED25519: 0x00,
+  Ed25519: 0x00,
   Secp256k1: 0x01,
+  Secp256r1: 0x02,
+  MultiSig: 0x03,
 };
 
 export const SIGNATURE_FLAG_TO_SCHEME = {
-  0x00: 'ED25519',
+  0x00: 'Ed25519',
   0x01: 'Secp256k1',
+  0x02: 'Secp256r1',
+  0x03: 'MultiSig',
 } as const;
+export type SignatureFlag = keyof typeof SIGNATURE_FLAG_TO_SCHEME;
 
 export function toSerializedSignature({
   signature,
@@ -60,7 +65,7 @@ export function fromSerializedSignature(
     SIGNATURE_FLAG_TO_SCHEME[bytes[0] as keyof typeof SIGNATURE_FLAG_TO_SCHEME];
 
   const PublicKey =
-    signatureScheme === 'ED25519' ? Ed25519PublicKey : Secp256k1PublicKey;
+    signatureScheme === 'Ed25519' ? Ed25519PublicKey : Secp256k1PublicKey;
 
   const signature = bytes.slice(1, bytes.length - PublicKey.SIZE);
   const pubkeyBytes = bytes.slice(1 + signature.length);

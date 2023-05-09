@@ -29,7 +29,7 @@ export async function verifyMessage(
   );
   const digest = blake2b(messageBytes, { dkLen: 32 });
   switch (signature.signatureScheme) {
-    case 'ED25519':
+    case 'Ed25519':
       return nacl.sign.detached.verify(
         digest,
         signature.signature,

@@ -53,13 +53,18 @@ export interface PublicKey {
    * Return the Sui address associated with this public key
    */
   toSuiAddress(): string;
+
+  /**
+   * Return signature scheme flag of the public key
+   */
+  flag(): Uint8Array;
 }
 
 export function publicKeyFromSerialized(
   schema: SignatureScheme,
   pubKey: string,
 ): PublicKey {
-  if (schema === 'ED25519') {
+  if (schema === 'Ed25519') {
     return new Ed25519PublicKey(pubKey);
   }
   if (schema === 'Secp256k1') {

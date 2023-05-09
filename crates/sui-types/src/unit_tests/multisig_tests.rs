@@ -3,21 +3,25 @@
 
 use std::str::FromStr;
 
-use fastcrypto::traits::ToFromBytes;
-use once_cell::sync::OnceCell;
-use rand::{rngs::StdRng, SeedableRng};
-use roaring::RoaringBitmap;
-
 use super::{MultiSigPublicKey, ThresholdUnit, WeightUnit};
 use crate::{
     base_types::SuiAddress,
     crypto::{
-        get_key_pair, get_key_pair_from_rng, Ed25519SuiSignature, Signature, SuiKeyPair,
+        get_key_pair, get_key_pair_from_rng, Ed25519SuiSignature, PublicKey, Signature, SuiKeyPair,
         SuiSignatureInner,
     },
     multisig::{MultiSig, MAX_SIGNER_IN_MULTISIG},
     signature::{AuthenticatorTrait, GenericSignature},
 };
+use fastcrypto::{
+    ed25519::{Ed25519KeyPair, Ed25519PrivateKey, Ed25519PublicKey},
+    encoding::{Base64, Encoding},
+    secp256k1::{Secp256k1KeyPair, Secp256k1PrivateKey},
+    traits::ToFromBytes,
+};
+use once_cell::sync::OnceCell;
+use rand::{rngs::StdRng, SeedableRng};
+use roaring::RoaringBitmap;
 use shared_crypto::intent::{Intent, IntentMessage, PersonalMessage};
 
 pub fn keys() -> Vec<SuiKeyPair> {
@@ -367,4 +371,98 @@ fn test_max_sig() {
     let sig = Signature::new_secure(&msg, &keys[0]);
     let multisig = MultiSig::combine(vec![sig; 1], low_threshold_pk).unwrap();
     assert!(multisig.verify_secure_generic(&msg, address).is_ok());
+}
+
+#[test]
+fn multisig_address_consistency_test() {
+    let keys = keys();
+    let pk1 = keys[0].public();
+    let pk2 = keys[1].public();
+
+    let multisig_pk =
+        MultiSigPublicKey::new(vec![pk1, pk2.clone()], vec![2, 3], 4).unwrap();
+    let addr = SuiAddress::from(&multisig_pk);
+    assert_eq!(
+        addr,
+        SuiAddress::from_str("0x877aa5c525c5662060e9f01c6f8a931cdc4917ac926666ac9b61562ead3e3238")
+            .unwrap()
+    );
+}
+
+#[test]
+fn multisig_serde_test() {
+    let k1 = SuiKeyPair::Ed25519(Ed25519KeyPair::from(
+        Ed25519PrivateKey::from_bytes(&[
+            59, 148, 11, 85, 134, 130, 61, 253, 2, 174, 59, 70, 27, 180, 51, 107, 94, 203, 174,
+            253, 102, 39, 170, 146, 46, 252, 4, 143, 236, 12, 136, 28,
+        ])
+        .unwrap(),
+    ));
+    let pk1 = k1.public();
+    println!("pk1: {:?}", pk1.as_ref());
+
+    let k2 = SuiKeyPair::Secp256k1(Secp256k1KeyPair::from(
+        Secp256k1PrivateKey::from_bytes(&[
+            59, 148, 11, 85, 134, 130, 61, 253, 2, 174, 59, 70, 27, 180, 51, 107, 94, 203, 174,
+            253, 102, 39, 170, 146, 46, 252, 4, 143, 236, 12, 136, 28,
+        ])
+        .unwrap(),
+    ));
+    let pk2 = k2.public();
+    println!("pk2: {:?}", pk2.as_ref());
+
+    let k3 = SuiKeyPair::Ed25519(Ed25519KeyPair::from(
+        Ed25519PrivateKey::from_bytes(&[0; 32]).unwrap(),
+    ));
+    let pk3 = k3.public();
+    println!("pk3: {:?}", pk3.as_ref());
+
+    // let pk2 = keys[1].public();
+    // let kp3: SuiKeyPair = SuiKeyPair::Secp256k1(get_key_pair_from_rng(&mut StdRng::from_seed([1; 32])).1);
+    // let pk3 = kp3.public();
+
+    let multisig_pk = MultiSigPublicKey::new(
+        vec![pk1.clone(), pk2.clone(), pk3.clone()],
+        vec![1, 2, 3],
+        3,
+    )
+    .unwrap();
+    let addr = SuiAddress::from(&multisig_pk);
+    println!("multisig_pk: {:?}", multisig_pk);
+    println!(
+        "multi_sig pk: {:?}",
+        Base64::encode(bcs::to_bytes(&multisig_pk).unwrap())
+    );
+
+    let msg = IntentMessage::new(
+        Intent::sui_transaction(),
+        PersonalMessage {
+            message: "Hello".as_bytes().to_vec(),
+        },
+    );
+    println!("msg: {:?}", bcs::to_bytes(&msg).unwrap());
+    let sig1 = Signature::new_secure(&msg, &k1);
+    let sig2 = Signature::new_secure(&msg, &k2);
+
+    let _p = PublicKey::Ed25519(
+        (&Ed25519PublicKey::from_bytes(&[
+            90, 226, 32, 180, 178, 246, 94, 151, 124, 18, 237, 230, 21, 121, 255, 81, 112, 182,
+            194, 44, 0, 97, 104, 195, 123, 94, 124, 97, 175, 1, 128, 131,
+        ])
+        .unwrap())
+            .into(),
+    );
+
+    let multi_sig =
+        MultiSig::combine(vec![sig1.clone(), sig2.clone()], multisig_pk.clone()).unwrap();
+    println!("multi_sig: {:?}", multi_sig);
+    println!("multi_sig: {:?}", Base64::encode(multi_sig.as_bytes()));
+
+    assert!(multi_sig.verify_secure_generic(&msg, addr).is_ok());
+
+    assert_eq!(
+        addr,
+        SuiAddress::from_str("0x37b048598ca569756146f4e8ea41666c657406db154a31f11bb5c1cbaf0b98d7")
+            .unwrap()
+    );
 }
