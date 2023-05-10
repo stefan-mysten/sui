@@ -121,6 +121,13 @@ pub struct ValidatorComponents {
     sui_tx_validator_metrics: Arc<SuiTxValidatorMetrics>,
 }
 
+#[cfg(msim)]
+struct SimState {
+    sim_node: sui_simulator::runtime::NodeHandle,
+    sim_safe_mode_expected: AtomicBool,
+    _leak_detector: sui_simulator::NodeLeakDetector,
+}
+
 pub struct SuiNode {
     config: NodeConfig,
     validator_components: Mutex<Option<ValidatorComponents>>,
@@ -144,10 +151,7 @@ pub struct SuiNode {
     _db_checkpoint_handle: Option<oneshot::Sender<()>>,
 
     #[cfg(msim)]
-    sim_node: sui_simulator::runtime::NodeHandle,
-
-    #[cfg(msim)]
-    sim_safe_mode_expected: AtomicBool,
+    sim_state: SimState,
 }
 
 impl fmt::Debug for SuiNode {
@@ -492,10 +496,13 @@ impl SuiNode {
             trusted_peer_change_tx,
 
             _db_checkpoint_handle: db_checkpoint_handle,
+
             #[cfg(msim)]
-            sim_node: sui_simulator::runtime::NodeHandle::current(),
-            #[cfg(msim)]
-            sim_safe_mode_expected: AtomicBool::new(false),
+            sim_state: SimState {
+                sim_node: sui_simulator::runtime::NodeHandle::current(),
+                sim_safe_mode_expected: AtomicBool::new(false),
+                _leak_detector: sui_simulator::NodeLeakDetector::new(),
+            },
         };
 
         info!("SuiNode started!");
@@ -516,7 +523,8 @@ impl SuiNode {
     #[cfg(msim)]
     pub fn set_safe_mode_expected(&self, new_value: bool) {
         info!("Setting safe mode expected to {}", new_value);
-        self.sim_safe_mode_expected
+        self.sim_state
+            .sim_safe_mode_expected
             .store(new_value, Ordering::Relaxed);
     }
 
@@ -1007,7 +1015,11 @@ impl SuiNode {
                 .expect("Read Sui System State object cannot fail");
 
             #[cfg(msim)]
-            if !self.sim_safe_mode_expected.load(Ordering::Relaxed) {
+            if !self
+                .sim_state
+                .sim_safe_mode_expected
+                .load(Ordering::Relaxed)
+            {
                 debug_assert!(!latest_system_state.safe_mode());
             }
 
