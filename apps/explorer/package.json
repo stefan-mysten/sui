@@ -20,6 +20,7 @@
         "preview-storybook": "pnpm dlx serve ./storybook-static"
     },
     "dependencies": {
+        "@amplitude/analytics-browser": "^1.10.3",
         "@floating-ui/react": "^0.23.0",
         "@fontsource/inter": "^4.5.15",
         "@fontsource/red-hat-mono": "^4.5.12",

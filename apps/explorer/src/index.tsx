@@ -9,11 +9,15 @@ import ReactDOM from 'react-dom/client';
 import { RouterProvider } from 'react-router-dom';
 
 import { router } from './pages';
+import { initAmplitude } from './utils/amplitude';
 import { growthbook } from './utils/growthbook';
 import './utils/sentry';
 import { reportWebVitals } from './utils/vitals';
 
 import './index.css';
+
+// Load Amplitude as early as we can:
+initAmplitude();
 
 // Start loading features as early as we can:
 growthbook.loadFeatures();
