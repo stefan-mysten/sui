@@ -17,6 +17,7 @@
         "preview": "vite preview",
         "storybook": "storybook dev",
         "build-storybook": "storybook build",
+        "pull-amplitude": "ampli pull web && node prependLicense.mjs && prettier -w ampli.json src/utils/ampli/index.ts",
         "preview-storybook": "pnpm dlx serve ./storybook-static"
     },
     "dependencies": {
