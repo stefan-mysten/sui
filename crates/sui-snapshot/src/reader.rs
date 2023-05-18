@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::{
-    Blob, Encoding, FileMetadata, FileType, Manifest, MAGIC_BYTES, MANIFEST_FILE_MAGIC,
+    FileMetadata, FileType, Manifest, MAGIC_BYTES, MANIFEST_FILE_MAGIC,
     OBJECT_FILE_MAGIC, OBJECT_ID_BYTES, OBJECT_REF_BYTES, REFERENCE_FILE_MAGIC, SEQUENCE_NUM_BYTES,
     SHA3_BYTES,
 };
@@ -29,6 +29,7 @@ use sui_storage::object_store::util::{copy_file, copy_files, path_to_filesystem}
 use sui_storage::object_store::ObjectStoreConfig;
 use sui_types::base_types::{ObjectDigest, ObjectID, ObjectRef, SequenceNumber};
 use tokio::sync::Mutex;
+use sui_storage::{Blob, Encoding};
 
 pub type DigestByBucketAndPartition = BTreeMap<u32, BTreeMap<u32, [u8; 32]>>;
 pub struct StateSnapshotReaderV1 {
@@ -368,7 +369,7 @@ pub struct LiveObjectIter {
 
 impl LiveObjectIter {
     pub fn new(file_metadata: &FileMetadata, bytes: Bytes) -> Result<Self> {
-        let mut reader = file_metadata.file_compression.stream_decompress(bytes)?;
+        let mut reader = file_metadata.file_compression.bytes_decompress(bytes)?;
         let magic = reader.read_u32::<BigEndian>()?;
         if magic != OBJECT_FILE_MAGIC {
             Err(anyhow!(
