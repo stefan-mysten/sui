@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Types } from '@amplitude/analytics-browser';
+import { MemoryStorage } from '@amplitude/analytics-core';
 import { getProductAnalyticsConfig } from '@mysten/core';
 
 import { ampli } from './ampli';
@@ -18,7 +19,11 @@ export async function initAmplitude() {
                 logLevel: IS_PROD_ENV
                     ? Types.LogLevel.Warn
                     : Types.LogLevel.Debug,
-                disableCookies,
+                ...(disableCookies && {
+                    disableCookies,
+                    cookieStorage: new MemoryStorage(),
+                    storageProvider: new MemoryStorage(),
+                }),
             },
         },
     });
