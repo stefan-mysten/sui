@@ -1,11 +1,13 @@
 // Copyright (c) Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
+use crate::reader::ArchiveReaderV1;
 use crate::writer::ArchiveWriterV1;
 use crate::{read_manifest, FileCompression, EPOCH_DIR_PREFIX};
 use object_store::path::Path;
 use object_store::DynObjectStore;
 use prometheus::Registry;
+use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -19,6 +21,7 @@ use tempfile::tempdir;
 
 struct TestState {
     archive_writer: ArchiveWriterV1,
+    archive_reader: ArchiveReaderV1,
     local_path: PathBuf,
     remote_path: PathBuf,
     local_store: Arc<DynObjectStore>,
@@ -57,6 +60,7 @@ async fn write_new_checkpoints_to_store(
 async fn setup_checkpoint_writer(temp_dir: PathBuf) -> anyhow::Result<TestState> {
     let local_path = temp_dir.join("local_dir");
     let remote_path = temp_dir.join("remote_dir");
+    let local_staging_path = temp_dir.join("local_staging");
     let local_store_config = ObjectStoreConfig {
         object_store: Some(ObjectStoreType::File),
         directory: Some(local_path.clone()),
@@ -77,10 +81,23 @@ async fn setup_checkpoint_writer(temp_dir: PathBuf) -> anyhow::Result<TestState>
         &Registry::default(),
     )
     .await?;
+
+    let local_store_read_config = ObjectStoreConfig {
+        object_store: Some(ObjectStoreType::File),
+        directory: Some(local_staging_path),
+        ..Default::default()
+    };
+    let archive_reader = ArchiveReaderV1::new(
+        remote_store_config.clone(),
+        local_store_read_config,
+        NonZeroUsize::new(2).unwrap(),
+    )
+    .await?;
     let local_store = local_store_config.make()?;
     let remote_store = remote_store_config.make()?;
     Ok(TestState {
         archive_writer,
+        archive_reader,
         local_path,
         remote_path,
         local_store,
@@ -161,5 +178,24 @@ async fn test_archive_resumes() -> Result<(), anyhow::Error> {
     let _kill = test_state.archive_writer.start(test_store.clone())?;
     insert_checkpoints_and_verify_manifest(&test_state, test_store, prev_checkpoint).await?;
 
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_archive_reader_basic() -> Result<(), anyhow::Error> {
+    let test_store = SharedInMemoryStore::default();
+    let mut test_state = setup_checkpoint_writer(temp_dir()).await?;
+    let _kill = test_state.archive_writer.start(test_store.clone())?;
+    insert_checkpoints_and_verify_manifest(&test_state, test_store, None).await?;
+    let latest_archived_checkpoint = test_state
+        .archive_reader
+        .latest_available_checkpoint()
+        .await?;
+    assert!(latest_archived_checkpoint > 0);
+    let read_store = SharedInMemoryStore::default();
+    test_state
+        .archive_reader
+        .read(read_store, 0..(latest_archived_checkpoint + 1))
+        .await?;
     Ok(())
 }

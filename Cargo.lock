@@ -9923,6 +9923,7 @@ dependencies = [
  "serde 1.0.152",
  "shared-crypto",
  "sui-config",
+ "sui-storage",
  "sui-swarm-config",
  "sui-types",
  "tap",
