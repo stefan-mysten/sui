@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::crypto::{SignatureScheme, SuiSignature};
+use crate::multisig::MultiSigLegacy;
 use crate::{base_types::SuiAddress, crypto::Signature, error::SuiError, multisig::MultiSig};
 pub use enum_dispatch::enum_dispatch;
 use fastcrypto::{
@@ -37,8 +38,10 @@ pub enum GenericSignature {
 }
 
 /// GenericSignature encodes a single signature [enum Signature] as is `flag || signature || pubkey`.
-/// It encodes [struct MultiSig] as the MultiSig flag (0x03) concat with the bcs serializedbytes
-/// of [struct MultiSig] i.e. `flag || bcs_bytes(MultiSig)`.
+/// It encodes [struct MultiSigLegacy] as the MultiSig flag (0x03) concat with the bcs serializedbytes
+/// of [struct MultiSigLegacy] i.e. `flag || bcs_bytes(MultiSigLegacy)`.
+/// [struct Multisig] is encodede as the MultiSig flag (0x03) concat with the bcs serializedbytes
+/// of [struct Multisig] i.e. `flag || bcs_bytes(Multisig)`.
 impl ToFromBytes for GenericSignature {
     fn from_bytes(bytes: &[u8]) -> Result<Self, FastCryptoError> {
         match SignatureScheme::from_flag_byte(
@@ -51,7 +54,7 @@ impl ToFromBytes for GenericSignature {
                     Signature::from_bytes(bytes).map_err(|_| FastCryptoError::InvalidSignature)?,
                 )),
                 SignatureScheme::MultiSig => {
-                    let multisig = MultiSig::from_bytes(bytes)?;
+                    let multisig = MultiSigLegacy::from_bytes(bytes)?;
                     Ok(GenericSignature::MultiSig(multisig))
                 }
                 _ => Err(FastCryptoError::InvalidInput),

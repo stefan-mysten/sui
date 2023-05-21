@@ -33,31 +33,46 @@ use crate::{
     error::SuiError,
 };
 
-#[cfg(test)]
-#[path = "unit_tests/multisig_tests.rs"]
-mod multisig_tests;
-
 pub type WeightUnit = u8;
 pub type ThresholdUnit = u16;
 pub const MAX_SIGNER_IN_MULTISIG: usize = 10;
+
 /// The struct that contains signatures and public keys necessary for authenticating a MultiSig.
 #[serde_as]
 #[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
-pub struct MultiSig {
+pub struct MultiSigLegacy {
     /// The plain signature encoded with signature scheme.
     sigs: Vec<CompressedSignature>,
     /// A bitmap that indicates the position of which public key the signature should be authenticated with.
     #[schemars(with = "Base64")]
-    bitmap: Vec<u8>,
+    #[serde_as(as = "SuiBitmap")]
+    bitmap: RoaringBitmap,
     /// The public key encoded with each public key with its signature scheme used along with the corresponding weight.
     multisig_pk: MultiSigPublicKey,
-    /// A bytes representation of [struct MultiSig]. This helps with implementing [trait AsRef<[u8]>].
+    /// A bytes representation of [struct MultiSigLegacy]. This helps with implementing [trait AsRef<[u8]>].
     #[serde(skip)]
     bytes: OnceCell<Vec<u8>>,
 }
 
+/// This initialize the underlying bytes representation of MultiSig. It encodes
+/// [struct MultiSigLegacy] as the MultiSig flag (0x03) concat with the bcs bytes
+/// of [struct MultiSigLegacy] i.e. `flag || bcs_bytes(MultiSig)`.
+impl AsRef<[u8]> for MultiSigLegacy {
+    fn as_ref(&self) -> &[u8] {
+        self.bytes
+            .get_or_try_init::<_, eyre::Report>(|| {
+                let as_bytes = bcs::to_bytes(self).expect("BCS serialization should not fail");
+                let mut bytes = Vec::with_capacity(1 + as_bytes.len());
+                bytes.push(SignatureScheme::MultiSig.flag());
+                bytes.extend_from_slice(as_bytes.as_slice());
+                Ok(bytes)
+            })
+            .expect("OnceCell invariant violated")
+    }
+}
+
 /// Necessary trait for [struct SenderSignedData].
-impl PartialEq for MultiSig {
+impl PartialEq for MultiSigLegacy {
     fn eq(&self, other: &Self) -> bool {
         self.sigs == other.sigs
             && self.bitmap == other.bitmap
@@ -66,16 +81,16 @@ impl PartialEq for MultiSig {
 }
 
 /// Necessary trait for [struct SenderSignedData].
-impl Eq for MultiSig {}
+impl Eq for MultiSigLegacy {}
 
 /// Necessary trait for [struct SenderSignedData].
-impl Hash for MultiSig {
+impl Hash for MultiSigLegacy {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.as_ref().hash(state);
     }
 }
 
-impl AuthenticatorTrait for MultiSig {
+impl AuthenticatorTrait for MultiSigLegacy {
     fn verify_secure_generic<T>(
         &self,
         value: &IntentMessage<T>,
@@ -170,7 +185,7 @@ impl AuthenticatorTrait for MultiSig {
     }
 }
 
-impl MultiSig {
+impl MultiSigLegacy {
     /// This combines a list of [enum Signature] `flag || signature || pk` to a MultiSig.
     pub fn combine(
         full_sigs: Vec<Signature>,
@@ -187,15 +202,20 @@ impl MultiSig {
                 error: "Invalid number of signatures".to_string(),
             });
         }
-        let mut bitmap = Vec::with_capacity(full_sigs.len());
+        let mut bitmap = RoaringBitmap::new();
         let mut sigs = Vec::with_capacity(full_sigs.len());
         for s in full_sigs {
             let pk = s.to_public_key()?;
-            bitmap.push(multisig_pk.get_index(&pk).ok_or(
+            let inserted = bitmap.insert(multisig_pk.get_index(&pk).ok_or(
                 SuiError::IncorrectSigner {
                     error: format!("pk does not exist: {:?}", pk),
                 },
             )?);
+            if !inserted {
+                return Err(SuiError::InvalidSignature {
+                    error: "Duplicate sigature".to_string(),
+                });
+            }
             sigs.push(s.to_compressed()?);
         }
         Ok(MultiSigLegacy {
@@ -227,28 +247,28 @@ impl MultiSig {
     }
 }
 
-impl ToFromBytes for MultiSig {
-    fn from_bytes(bytes: &[u8]) -> Result<MultiSig, FastCryptoError> {
+impl ToFromBytes for MultiSigLegacy {
+    fn from_bytes(bytes: &[u8]) -> Result<MultiSigLegacy, FastCryptoError> {
         // The first byte matches the flag of MultiSig.
         if bytes.first().ok_or(FastCryptoError::InvalidInput)? != &SignatureScheme::MultiSig.flag()
         {
             return Err(FastCryptoError::InvalidInput);
         }
-        let multisig: MultiSig =
+        let multisig: MultiSigLegacy =
             bcs::from_bytes(&bytes[1..]).map_err(|_| FastCryptoError::InvalidSignature)?;
         multisig.validate()?;
         Ok(multisig)
     }
 }
 
-impl FromStr for MultiSig {
+impl FromStr for MultiSigLegacy {
     type Err = SuiError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let bytes = Base64::decode(s).map_err(|_| SuiError::InvalidSignature {
             error: "Invalid base64 string".to_string(),
         })?;
-        let sig = MultiSig::from_bytes(&bytes).map_err(|_| SuiError::InvalidSignature {
+        let sig = MultiSigLegacy::from_bytes(&bytes).map_err(|_| SuiError::InvalidSignature {
             error: "Invalid multisig bytes".to_string(),
         })?;
         Ok(sig)
@@ -257,16 +277,16 @@ impl FromStr for MultiSig {
 
 /// The struct that contains the public key used for authenticating a MultiSig.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct MultiSigPublicKey {
+pub struct MultiSigPublicKeyLegacy {
     /// A list of public key and its corresponding weight.
-    pk_map: Vec<(PublicKey, WeightUnit)>,
+    pk_map: Vec<(PublicKeyLegacy, WeightUnit)>,
     /// If the total weight of the public keys corresponding to verified signatures is larger than threshold, the MultiSig is verified.
     threshold: ThresholdUnit,
 }
 
-impl MultiSigPublicKey {
+impl MultiSigPublicKeyLegacy {
     pub fn new(
-        pks: Vec<PublicKey>,
+        pks: Vec<PublicKeyLegacy>,
         weights: Vec<WeightUnit>,
         threshold: ThresholdUnit,
     ) -> Result<Self, SuiError> {
@@ -286,7 +306,7 @@ impl MultiSigPublicKey {
                 error: "Invalid multisig public key construction".to_string(),
             });
         }
-        Ok(MultiSigPublicKey {
+        Ok(MultiSigPublicKeyLegacy {
             pk_map: pks.into_iter().zip(weights.into_iter()).collect(),
             threshold,
         })
@@ -322,5 +342,22 @@ impl MultiSigPublicKey {
             return Err(FastCryptoError::InvalidInput);
         }
         Ok(())
+    }
+}
+
+/// This initialize the underlying bytes representation of MultiSig. It encodes
+/// [struct MultiSigLegacy] as the MultiSig flag (0x03) concat with the bcs bytes
+/// of [struct MultiSigLegacy] i.e. `flag || bcs_bytes(MultiSig)`.
+impl AsRef<[u8]> for MultiSigLegacy {
+    fn as_ref(&self) -> &[u8] {
+        self.bytes
+            .get_or_try_init::<_, eyre::Report>(|| {
+                let as_bytes = bcs::to_bytes(self).expect("BCS serialization should not fail");
+                let mut bytes = Vec::with_capacity(1 + as_bytes.len());
+                bytes.push(SignatureScheme::MultiSig.flag());
+                bytes.extend_from_slice(as_bytes.as_slice());
+                Ok(bytes)
+            })
+            .expect("OnceCell invariant violated")
     }
 }

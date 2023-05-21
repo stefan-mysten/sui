@@ -5,10 +5,11 @@ import { describe, it, expect } from 'vitest';
 import { combinePartialSigs, decodeMultiSig, toMultiSigAddress } from '../../../src/cryptography/multisig';
 import { Ed25519Keypair, Ed25519PublicKey, Secp256k1Keypair, Secp256k1PublicKey, toSerializedSignature } from '../../../src';
 import { blake2b } from '@noble/hashes/blake2b';
+import { RoaringBitmap32 } from 'roaring';
 
 describe('to multisig address', () => {
   it('equals to rust impl', () => {
-    // See rust test: fn multisig_consistency_test()
+    // See rust test: fn m,ultisig_consistency_test()
     const pk1 = new Ed25519PublicKey([13, 125, 171, 53, 140, 141, 173, 170, 78, 250, 0, 73, 167, 91, 7, 67, 101, 85, 177, 10, 54, 130, 25, 187, 104, 15, 112, 87, 19, 73, 215, 117]);
     const pk2 = new Secp256k1PublicKey([2, 14, 23, 205, 89, 57, 228, 107, 25, 102, 65, 150, 140, 215, 89, 145, 11, 162, 87, 126, 39, 250, 115, 253, 227, 135, 109, 185, 190, 197, 188, 235, 43]);
     expect(toMultiSigAddress([{pubKey: pk1, weight: 2}, {pubKey: pk2, weight: 3}], new Uint8Array([4, 0]))).toEqual("0x877aa5c525c5662060e9f01c6f8a931cdc4917ac926666ac9b61562ead3e3238");
@@ -54,5 +55,16 @@ describe('combine partial multisig', () => {
     
     let decoded = decodeMultiSig(multisig);
     expect(decoded).toEqual([sig1, sig2]);
+  });
+
+  it('test', () => {
+    let f = new RoaringBitmap32();
+    f.add(0);
+    f.add(1);
+    console.log(f.toArray());
+
+    let d = Array.from(f.serialize(true).map((x) => Number(x)));
+    console.log(d);
+    expect(d).toEqual([58, 48, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 16, 0, 0, 0, 0, 0, 1, 0]);
   });
 });
