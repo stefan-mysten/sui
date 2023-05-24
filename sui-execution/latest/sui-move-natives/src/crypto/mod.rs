@@ -7,5 +7,6 @@ pub mod ecdsa_r1;
 pub mod ecvrf;
 pub mod ed25519;
 pub mod groth16;
+pub mod group_ops;
 pub mod hash;
 pub mod hmac;
