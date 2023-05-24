@@ -66,21 +66,15 @@ module sui::group_ops {
     public(friend) fun multi_scalar_multiplication<S, G>(type: u8, scalars: &vector<Element<S>>, elements: &vector<Element<G>>): Element<G> {
         assert!(vector::length(scalars) == vector::length(elements), EInvalidInput);
         assert!(vector::length(scalars) > 0, EInvalidInput);
-        assert!(vector::length(elements) <= 32, EInvalidInput);
+        assert!(vector::length(elements) <= 32, EInvalidInput); // TODO: other limit?
 
         let scalars_bytes = vector::empty<u8>();
         let elements_bytes = vector::empty<u8>();
         let i = 0;
         while (i < vector::length(scalars)) {
-            let scalar_vec_ref = vector::borrow(scalars, i);
-            let scalar_vec = *scalar_vec_ref;
+            let scalar_vec = *vector::borrow(scalars, i);
             vector::append(&mut scalars_bytes, scalar_vec.bytes);
-            i = i + 1;
-        };
-        i = 0;
-        while (i < vector::length(elements)) {
-            let element_vec_ref = vector::borrow(elements, i);
-            let element_vec = *element_vec_ref;
+            let element_vec = *vector::borrow(elements, i);
             vector::append(&mut elements_bytes, element_vec.bytes);
             i = i + 1;
         };
@@ -108,7 +102,6 @@ module sui::group_ops {
     native fun internal_div(type: u8, e1: &vector<u8>, e2: &vector<u8>): vector<u8>;
 
     // TODO: do we want to support any DST for BLS12-381?
-    // TODO: do we need map_to_group?
     native fun internal_hash_to(type: u8, m: &vector<u8>): vector<u8>;
     native fun internal_multi_scalar_mul(type: u8, scalars: &vector<u8>, elements: &vector<u8>): vector<u8>;
 

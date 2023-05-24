@@ -31,9 +31,6 @@ module sui::ristretto_tests {
         let eight = ristretto255::scalar_mul(&four, &two);
         assert!(group_ops::equal(&eight, &ristretto255::scalar_from_u64(8)), 0);
 
-        let eight_from_bytes = ristretto255::scalar_from_bytes(group_ops::bytes(&eight));
-        assert!(group_ops::equal(&eight, &eight_from_bytes), 0);
-
         let six = ristretto255::scalar_sub(&eight, &two);
         assert!(group_ops::equal(&six, &ristretto255::scalar_from_u64(6)), 0);
 
@@ -49,6 +46,14 @@ module sui::ristretto_tests {
         let order_minus_one = ristretto255::scalar_from_bytes(&ORDER_MINUS_ONE_BYTES);
         let _ = ristretto255::scalar_add(&order_minus_one, &order_minus_one);
         let _ = ristretto255::scalar_mul(&order_minus_one, &order_minus_one);
+    }
+
+
+    #[test]
+    fun test_valid_scalar_from_bytes() {
+        let eight = ristretto255::scalar_from_u64(8);
+        let eight_from_bytes = ristretto255::scalar_from_bytes(group_ops::bytes(&eight));
+        assert!(group_ops::equal(&eight, &eight_from_bytes), 0);
     }
 
     #[test]
@@ -122,6 +127,13 @@ module sui::ristretto_tests {
     }
 
     #[test]
+    fun test_valid_gt_from_bytes() {
+        let g = ristretto255::g_generator();
+        let g_from_bytes = ristretto255::g_from_bytes(group_ops::bytes(&g));
+        assert!(group_ops::equal(&g, &g_from_bytes), 0);
+    }
+
+    #[test]
     #[expected_failure(abort_code = group_ops::EInvalidInput)]
     fun test_invalid_g_too_short() {
         let _ = ristretto255::g_from_bytes(&SHORT_G_BYTES);
@@ -167,6 +179,6 @@ module sui::ristretto_tests {
         let four_g = ristretto255::g_mul(&ristretto255::scalar_from_u64(4), &ristretto255::g_generator());
         assert!(rfc_four_g == *group_ops::bytes(&four_g), 0);
 
-        // TODO: add more checks
+        // TODO: more test vectors
     }
 }

@@ -178,7 +178,7 @@ pub fn internal_add(
 
     match result {
         Ok(bytes) => Ok(NativeResult::ok(cost, smallvec![Value::vector_u8(bytes)])),
-        // Since all Element<G> are validated on construction, this error should never happen unless the requested type is wrong.
+        // Since all Element<G> are validated on construction, this error should never happen unless the requested type is wrong or inputs are invalid.
         Err(_) => Ok(NativeResult::err(cost, INVALID_INPUT)),
     }
 }
@@ -228,7 +228,7 @@ pub fn internal_sub(
 
     match result {
         Ok(bytes) => Ok(NativeResult::ok(cost, smallvec![Value::vector_u8(bytes)])),
-        // Since all Element<G> are validated on construction, this error should never happen unless the requested type is wrong.
+        // Since all Element<G> are validated on construction, this error should never happen unless the requested type is wrong or inputs are invalid.
         Err(_) => Ok(NativeResult::err(cost, INVALID_INPUT)),
     }
 }
@@ -289,7 +289,7 @@ pub fn internal_mul(
 
     match result {
         Ok(bytes) => Ok(NativeResult::ok(cost, smallvec![Value::vector_u8(bytes)])),
-        // Since all Element<G> are validated on construction, this error should never happen unless the requested type is wrong.
+        // Since all Element<G> are validated on construction, this error should never happen unless the requested type is wrong or inputs are invalid.
         Err(_) => Ok(NativeResult::err(cost, INVALID_INPUT)),
     }
 }
@@ -350,7 +350,7 @@ pub fn internal_div(
 
     match result {
         Ok(bytes) => Ok(NativeResult::ok(cost, smallvec![Value::vector_u8(bytes)])),
-        // Since all Element<G> are validated on construction, this error should never happen unless the requested type is wrong.
+        // Since all Element<G> are validated on construction, this error should never happen unless the requested type is wrong, inputs are invalid, or a=0.
         Err(_) => Ok(NativeResult::err(cost, INVALID_INPUT)),
     }
 }
@@ -387,7 +387,7 @@ pub fn internal_hash_to(
 
     match result {
         Ok(bytes) => Ok(NativeResult::ok(cost, smallvec![Value::vector_u8(bytes)])),
-        // Since all Element<G> are validated on construction, this error should never happen unless the requested type is wrong.
+        // Since all Element<G> are validated on construction, this error should never happen unless the requested type is wrong or inputs are invalid.
         Err(_) => Ok(NativeResult::err(cost, INVALID_INPUT)),
     }
 }
@@ -465,7 +465,7 @@ pub fn internal_multi_scalar_mul(
 
     match result {
         Ok(bytes) => Ok(NativeResult::ok(cost, smallvec![Value::vector_u8(bytes)])),
-        // Since all Element<G> are validated on construction, this error should never happen unless the requested type is wrong.
+        // Since all Element<G> are validated on construction, this error should never happen unless the requested type is wrong or inputs are invalid.
         Err(_) => Ok(NativeResult::err(cost, INVALID_INPUT)),
     }
 }

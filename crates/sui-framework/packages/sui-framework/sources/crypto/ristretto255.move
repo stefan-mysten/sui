@@ -52,13 +52,13 @@ module sui::ristretto255 {
         group_ops::sub(SCALAR_TYPE, e1, e2)
     }
 
-    public fun scalar_mul(scalar: &Element<Scalar>, e: &Element<Scalar>): Element<Scalar> {
-        group_ops::mul(SCALAR_TYPE, scalar, e)
+    public fun scalar_mul(e1: &Element<Scalar>, e2: &Element<Scalar>): Element<Scalar> {
+        group_ops::mul(SCALAR_TYPE, e1, e2)
     }
 
-    // Returns b/a, fails if a is zero.
-    public fun scalar_div(a: &Element<Scalar>, b: &Element<Scalar>): Element<Scalar> {
-        group_ops::div(SCALAR_TYPE, a, b)
+    // Returns e2 / e1, fails if a is zero.
+    public fun scalar_div(e1: &Element<Scalar>, e2: &Element<Scalar>): Element<Scalar> {
+        group_ops::div(SCALAR_TYPE, e1, e2)
     }
 
     public fun scalar_neg(e: &Element<Scalar>): Element<Scalar> {
@@ -95,13 +95,13 @@ module sui::ristretto255 {
         group_ops::sub(G_TYPE, e1, e2)
     }
 
-    public fun g_mul(scalar: &Element<Scalar>, e: &Element<G>): Element<G> {
-        group_ops::mul(G_TYPE, scalar, e)
+    public fun g_mul(e1: &Element<Scalar>, e2: &Element<G>): Element<G> {
+        group_ops::mul(G_TYPE, e1, e2)
     }
 
     // Returns e / scalar, fails if scalar is zero.
-    public fun g_div(scalar: &Element<Scalar>, e: &Element<G>): Element<G> {
-        group_ops::div(G_TYPE, scalar, e)
+    public fun g_div(e1: &Element<Scalar>, e2: &Element<G>): Element<G> {
+        group_ops::div(G_TYPE, e1, e2)
     }
 
     public fun g_neg(e: &Element<G>): Element<G> {

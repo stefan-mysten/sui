@@ -83,13 +83,13 @@ module sui::bls12381 {
         group_ops::sub(SCALAR_TYPE, e1, e2)
     }
 
-    public fun scalar_mul(scalar: &Element<Scalar>, e: &Element<Scalar>): Element<Scalar> {
-        group_ops::mul(SCALAR_TYPE, scalar, e)
+    public fun scalar_mul(e1: &Element<Scalar>, e2: &Element<Scalar>): Element<Scalar> {
+        group_ops::mul(SCALAR_TYPE, e1, e2)
     }
 
-    // Returns b/a, fails if a is zero.
-    public fun scalar_div(a: &Element<Scalar>, b: &Element<Scalar>): Element<Scalar> {
-        group_ops::div(SCALAR_TYPE, a, b)
+    // Returns e2/e1, fails if a is zero.
+    public fun scalar_div(e1: &Element<Scalar>, e2: &Element<Scalar>): Element<Scalar> {
+        group_ops::div(SCALAR_TYPE, e1, e2)
     }
 
     public fun scalar_neg(e: &Element<Scalar>): Element<Scalar> {
@@ -126,21 +126,21 @@ module sui::bls12381 {
         group_ops::sub(G1_TYPE, e1, e2)
     }
 
-    public fun g1_mul(scalar: &Element<Scalar>, e: &Element<G1>): Element<G1> {
-        group_ops::mul(G1_TYPE, scalar, e)
+    public fun g1_mul(e1: &Element<Scalar>, e2: &Element<G1>): Element<G1> {
+        group_ops::mul(G1_TYPE, e1, e2)
     }
 
-    // Returns e / scalar, fails if scalar is zero.
-    public fun g1_div(scalar: &Element<Scalar>, e: &Element<G1>): Element<G1> {
-        group_ops::div(G1_TYPE, scalar, e)
+    // Returns e2 / e1, fails if scalar is zero.
+    public fun g1_div(e1: &Element<Scalar>, e2: &Element<G1>): Element<G1> {
+        group_ops::div(G1_TYPE, e1, e2)
     }
 
     public fun g1_neg(e: &Element<G1>): Element<G1> {
         g1_sub(&g1_identity(), e)
     }
 
-    // Hashes using DST = BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_NUL_
-    public fun hash_to_g1(m: &vector<u8>): Element<Scalar> {
+    // Hash using DST = BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_NUL_
+    public fun hash_to_g1(m: &vector<u8>): Element<G1> {
         group_ops::hash_to(G1_TYPE, m)
     }
 
@@ -173,21 +173,21 @@ module sui::bls12381 {
         group_ops::sub(G2_TYPE, e1, e2)
     }
 
-    public fun g2_mul(scalar: &Element<Scalar>, e: &Element<G2>): Element<G2> {
-        group_ops::mul(G2_TYPE, scalar, e)
+    public fun g2_mul(e1: &Element<Scalar>, e2: &Element<G2>): Element<G2> {
+        group_ops::mul(G2_TYPE, e1, e2)
     }
 
-    // Returns e / scalar, fails if scalar is zero.
-    public fun g2_div(scalar: &Element<Scalar>, e: &Element<G2>): Element<G2> {
-        group_ops::div(G2_TYPE, scalar, e)
+    // Returns e2 / e1, fails if scalar is zero.
+    public fun g2_div(e1: &Element<Scalar>, e2: &Element<G2>): Element<G2> {
+        group_ops::div(G2_TYPE, e1, e2)
     }
 
     public fun g2_neg(e: &Element<G2>): Element<G2> {
         g2_sub(&g2_identity(), e)
     }
 
-    // Hashes using DST = BLS_SIG_BLS12381G2_XMD:SHA-256_SSWU_RO_NUL_
-    public fun hash_to_g2(m: &vector<u8>): Element<Scalar> {
+    // Hash using DST = BLS_SIG_BLS12381G2_XMD:SHA-256_SSWU_RO_NUL_
+    public fun hash_to_g2(m: &vector<u8>): Element<G2> {
         group_ops::hash_to(G2_TYPE, m)
     }
 
@@ -220,13 +220,13 @@ module sui::bls12381 {
         group_ops::sub(GT_TYPE, e1, e2)
     }
 
-    public fun gt_mul(scalar: &Element<Scalar>, e: &Element<GT>): Element<GT> {
-        group_ops::mul(GT_TYPE, scalar, e)
+    public fun gt_mul(e1: &Element<Scalar>, e2: &Element<GT>): Element<GT> {
+        group_ops::mul(GT_TYPE, e1, e2)
     }
 
-    // Returns e / scalar, fails if scalar is zero.
-    public fun gt_div(scalar: &Element<Scalar>, e: &Element<GT>): Element<GT> {
-        group_ops::div(GT_TYPE, scalar, e)
+    // Returns e2 / e1, fails if scalar is zero.
+    public fun gt_div(e1: &Element<Scalar>, e2: &Element<GT>): Element<GT> {
+        group_ops::div(GT_TYPE, e1, e2)
     }
 
     public fun gt_neg(e: &Element<GT>): Element<GT> {
