@@ -10,6 +10,7 @@ use crate::crypto::{
 use crate::error::SuiResult;
 use crate::executable_transaction::CertificateProof;
 use crate::messages_checkpoint::CheckpointSequenceNumber;
+use crate::signature::AuxVerifyData;
 use crate::transaction::VersionedProtocolMessage;
 use fastcrypto::traits::KeyPair;
 use once_cell::sync::OnceCell;
@@ -32,7 +33,7 @@ pub trait Message {
     /// Verify the internal data consistency of this message.
     /// In some cases, such as user signed transaction, we also need
     /// to verify the user signature here.
-    fn verify(&self, signature_epoch: Option<EpochId>) -> SuiResult;
+    fn verify(&self, aux_verify_data: AuxVerifyData) -> SuiResult;
 }
 
 #[derive(Clone, Debug, Eq, Serialize, Deserialize)]
@@ -118,7 +119,13 @@ impl<T: Message> Envelope<T, EmptySignInfo> {
     }
 
     pub fn verify_signature(&self) -> SuiResult {
-        self.data.verify(None)
+        // this method is usually called on client side to check tx validity
+        // before sending to server or used to validate serve response. this
+        // does not work for zk login signed tx since it cannot be verified
+        // without server side info (e.g. epoch and jwk).
+        // q: do we want to make these user passed in? or retrict this method
+        // only works for non-zk-login tx?
+        self.data.verify(AuxVerifyData::default())
     }
 
     pub fn verify(self) -> SuiResult<VerifiedEnvelope<T, EmptySignInfo>> {
@@ -161,7 +168,8 @@ where
     }
 
     pub fn verify_signature(&self, committee: &Committee) -> SuiResult {
-        self.data.verify(Some(self.auth_sig().epoch))?;
+        self.data
+            .verify(AuxVerifyData::new(Some(self.auth_sig().epoch), None))?;
         self.auth_signature
             .verify_secure(self.data(), Intent::sui_app(T::SCOPE), committee)
     }
@@ -224,7 +232,8 @@ where
     // TODO: Eventually we should remove all calls to verify_signature
     // and make sure they all call verify to avoid repeated verifications.
     pub fn verify_signature(&self, committee: &Committee) -> SuiResult {
-        self.data.verify(Some(self.auth_sig().epoch))?;
+        // todo: check if this is ok to get the jwk from memory even if its updated
+        // self.data.verify(Some(self.auth_sig().epoch))?;
         self.auth_signature
             .verify_secure(self.data(), Intent::sui_app(T::SCOPE), committee)
     }

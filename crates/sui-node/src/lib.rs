@@ -778,6 +778,7 @@ impl SuiNode {
                     epoch_store,
                     state.transaction_manager().clone(),
                     sui_tx_validator_metrics.clone(),
+                    state.get_google_jwk_as_bytes(),
                 ),
             )
             .await;

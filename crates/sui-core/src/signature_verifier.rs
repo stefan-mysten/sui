@@ -17,6 +17,7 @@ use sui_types::{
     error::{SuiError, SuiResult},
     message_envelope::Message,
     messages_checkpoint::SignedCheckpointSummary,
+    signature::AuxVerifyData,
     transaction::{CertifiedTransaction, VerifiedCertificate},
 };
 
@@ -123,6 +124,7 @@ impl SignatureVerifier {
         &self,
         certs: Vec<CertifiedTransaction>,
         checkpoints: Vec<SignedCheckpointSummary>,
+        google_jwk_as_bytes: Vec<u8>,
     ) -> SuiResult {
         let certs: Vec<_> = certs
             .into_iter()
@@ -132,21 +134,30 @@ impl SignatureVerifier {
         // Verify only the user sigs of certificates that were not cached already, since whenever we
         // insert a certificate into the cache, it is already verified.
         for cert in &certs {
-            self.verify_tx(cert.data())?;
+            self.verify_tx(cert.data(), google_jwk_as_bytes.clone())?;
         }
-        batch_verify_all_certificates_and_checkpoints(&self.committee, &certs, &checkpoints)?;
+        batch_verify_all_certificates_and_checkpoints(
+            &self.committee,
+            &certs,
+            &checkpoints,
+            google_jwk_as_bytes,
+        )?;
         self.certificate_cache
             .cache_digests(certs.into_iter().map(|c| c.certificate_digest()).collect());
         Ok(())
     }
 
     /// Verifies one cert asynchronously, in a batch.
-    pub async fn verify_cert(&self, cert: CertifiedTransaction) -> SuiResult<VerifiedCertificate> {
+    pub async fn verify_cert(
+        &self,
+        cert: CertifiedTransaction,
+        google_jwk_as_bytes: Vec<u8>,
+    ) -> SuiResult<VerifiedCertificate> {
         let cert_digest = cert.certificate_digest();
         if self.certificate_cache.is_cached(&cert_digest) {
             return Ok(VerifiedCertificate::new_unchecked(cert));
         }
-        self.verify_tx(cert.data())?;
+        self.verify_tx(cert.data(), google_jwk_as_bytes)?;
         self.verify_cert_skip_cache(cert)
             .await
             .tap_ok(|_| self.certificate_cache.cache_digest(cert_digest))
@@ -264,9 +275,18 @@ impl SignatureVerifier {
         });
     }
 
-    pub fn verify_tx(&self, signed_tx: &SenderSignedData) -> SuiResult {
+    pub fn verify_tx(
+        &self,
+        signed_tx: &SenderSignedData,
+        google_jwk_as_bytes: Vec<u8>,
+    ) -> SuiResult {
         self.signed_data_cache
-            .is_verified(signed_tx.full_message_digest(), || signed_tx.verify(None))
+            .is_verified(signed_tx.full_message_digest(), || {
+                signed_tx.verify(AuxVerifyData::new(
+                    Some(self.committee.epoch()),
+                    Some(google_jwk_as_bytes),
+                ))
+            })
     }
 }
 
@@ -348,11 +368,15 @@ pub fn batch_verify_all_certificates_and_checkpoints(
     committee: &Committee,
     certs: &[CertifiedTransaction],
     checkpoints: &[SignedCheckpointSummary],
+    google_jwk_as_bytes: Vec<u8>,
 ) -> SuiResult {
     // certs.data() is assumed to be verified already by the caller.
 
     for ckpt in checkpoints {
-        ckpt.data().verify(Some(committee.epoch()))?;
+        ckpt.data().verify(AuxVerifyData::new(
+            Some(committee.epoch()),
+            Some(google_jwk_as_bytes.clone()),
+        ))?;
     }
 
     batch_verify(committee, certs, checkpoints)

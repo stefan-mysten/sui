@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use bcs;
+use fastcrypto::rsa::{Base64UrlUnpadded, Encoding, RSAPublicKey};
 use fastcrypto::traits::KeyPair;
 use futures::{stream::FuturesUnordered, StreamExt};
 use move_binary_format::access::ModuleAccess;
@@ -25,6 +26,7 @@ use serde_json::json;
 use std::collections::HashSet;
 use std::fs;
 use std::{convert::TryInto, env};
+use sui_types::zk_login_authenticator::find_jwk_by_kid;
 
 use sui_json_rpc_types::{
     SuiArgument, SuiExecutionResult, SuiExecutionStatus, SuiTransactionBlockEffectsAPI, SuiTypeTag,
@@ -5468,4 +5470,22 @@ async fn test_publish_not_a_package_dependency() {
         },
         failure,
     )
+}
+
+#[tokio::test]
+async fn test_jwk_updater() {
+    telemetry_subscribers::init_for_testing();
+    let authority_state = TestAuthorityBuilder::new().build().await;
+    let res = authority_state.update_google_jwk().await;
+    assert!(res.is_ok());
+    let content = find_jwk_by_kid(
+        "822838c1c8bf9edcf1f5050662e54bcb1adb5b5f",
+        &authority_state.get_google_jwk_as_bytes(),
+    )
+    .unwrap();
+    let pk = RSAPublicKey::from_raw_components(
+        &Base64UrlUnpadded::decode_vec(&content.n).unwrap(),
+        &Base64UrlUnpadded::decode_vec(&content.e).unwrap(),
+    );
+    assert!(pk.is_ok());
 }

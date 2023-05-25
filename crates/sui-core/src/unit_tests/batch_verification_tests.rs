@@ -77,12 +77,13 @@ async fn test_batch_verify() {
     let certs = gen_certs(&committee, &key_pairs, 16);
     let ckpts = gen_ckpts(&committee, &key_pairs, 16);
 
-    batch_verify_all_certificates_and_checkpoints(&committee, &certs, &ckpts).unwrap();
+    batch_verify_all_certificates_and_checkpoints(&committee, &certs, &ckpts, vec![]).unwrap();
 
     {
         let mut ckpts = gen_ckpts(&committee, &key_pairs, 16);
         *ckpts[0].auth_sig_mut_for_testing() = ckpts[1].auth_sig().clone();
-        batch_verify_all_certificates_and_checkpoints(&committee, &certs, &ckpts).unwrap_err();
+        batch_verify_all_certificates_and_checkpoints(&committee, &certs, &ckpts, vec![])
+            .unwrap_err();
     }
 
     let (other_sender, other_sender_sec): (_, AccountKeyPair) = get_key_pair();
@@ -94,7 +95,8 @@ async fn test_batch_verify() {
         let other_tx = make_dummy_tx(receiver, other_sender, &other_sender_sec);
         let other_cert = make_cert_with_large_committee(&committee, &key_pairs, &other_tx);
         *certs[i].auth_sig_mut_for_testing() = other_cert.auth_sig().clone();
-        batch_verify_all_certificates_and_checkpoints(&committee, &certs, &ckpts).unwrap_err();
+        batch_verify_all_certificates_and_checkpoints(&committee, &certs, &ckpts, vec![])
+            .unwrap_err();
 
         let results = batch_verify_certificates(&committee, &certs);
         results[i].as_ref().unwrap_err();
@@ -102,6 +104,7 @@ async fn test_batch_verify() {
             r.as_ref().unwrap();
         }
     }
+    // todo: add a zk login tx in here
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
@@ -130,9 +133,9 @@ async fn test_async_verifier() {
                 for mut c in certs.into_iter() {
                     if thread_rng().gen_range(0..20) == 0 {
                         *c.auth_sig_mut_for_testing() = other_cert.auth_sig().clone();
-                        verifier.verify_cert(c).await.unwrap_err();
+                        verifier.verify_cert(c, vec![]).await.unwrap_err();
                     } else {
-                        verifier.verify_cert(c).await.unwrap();
+                        verifier.verify_cert(c, vec![]).await.unwrap();
                     }
                 }
             })
@@ -140,4 +143,5 @@ async fn test_async_verifier() {
         .collect();
 
     join_all(tasks).await;
+    // todo: add a zk login tx in here
 }

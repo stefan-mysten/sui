@@ -22,6 +22,7 @@ pub struct SuiTxValidator {
     epoch_store: Arc<AuthorityPerEpochStore>,
     _transaction_manager: Arc<TransactionManager>,
     metrics: Arc<SuiTxValidatorMetrics>,
+    google_jwk_as_bytes: Vec<u8>,
 }
 
 impl SuiTxValidator {
@@ -29,6 +30,7 @@ impl SuiTxValidator {
         epoch_store: Arc<AuthorityPerEpochStore>,
         transaction_manager: Arc<TransactionManager>,
         metrics: Arc<SuiTxValidatorMetrics>,
+        google_jwk_as_bytes: Vec<u8>,
     ) -> Self {
         info!(
             "SuiTxValidator constructed for epoch {}",
@@ -38,6 +40,7 @@ impl SuiTxValidator {
             epoch_store,
             _transaction_manager: transaction_manager,
             metrics,
+            google_jwk_as_bytes,
         }
     }
 }
@@ -89,11 +92,12 @@ impl TransactionValidator for SuiTxValidator {
         let cert_count = cert_batch.len();
         let ckpt_count = ckpt_batch.len();
         let epoch_store = self.epoch_store.clone();
+        let jwk = self.google_jwk_as_bytes.clone();
         Handle::current()
             .spawn_blocking(move || {
                 epoch_store
                     .signature_verifier
-                    .verify_certs_and_checkpoints(cert_batch, ckpt_batch)
+                    .verify_certs_and_checkpoints(cert_batch, ckpt_batch, jwk)
                     .tap_err(|e| warn!("batch verification error: {}", e))
                     .wrap_err("Malformed batch (failed to verify)")
             })
@@ -187,6 +191,7 @@ mod tests {
             state.epoch_store_for_testing().clone(),
             state.transaction_manager().clone(),
             metrics,
+            state.get_google_jwk_as_bytes(),
         );
         let res = validator.validate(&first_transaction_bytes);
         assert!(res.is_ok(), "{res:?}");
@@ -218,5 +223,6 @@ mod tests {
         let batch = Batch::new(bogus_transaction_bytes);
         let res_batch = validator.validate_batch(&batch).await;
         assert!(res_batch.is_err());
+        // todo: add a zk login tx here
     }
 }

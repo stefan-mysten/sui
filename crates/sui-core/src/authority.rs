@@ -4,6 +4,7 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::RwLock;
 use std::time::Duration;
 use std::{collections::HashMap, fs, pin::Pin, sync::Arc};
 
@@ -23,9 +24,11 @@ use prometheus::{
     register_int_gauge_vec_with_registry, register_int_gauge_with_registry, Histogram, IntCounter,
     IntCounterVec, IntGauge, IntGaugeVec, Registry,
 };
+use reqwest::Client;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use sui_config::node::StateDebugDumpConfig;
+use sui_types::zk_login_util::{OAuthProvider, DEFAULT_GOOGLE_JWK_BYTES};
 use tap::{TapFallible, TapOptional};
 use tokio::sync::mpsc::unbounded_channel;
 use tokio::sync::oneshot;
@@ -548,6 +551,9 @@ pub struct AuthorityState {
 
     /// Config for state dumping on forks
     debug_dump_config: StateDebugDumpConfig,
+
+    /// A serialized bytes array value of the Google JWK HTTP response.
+    google_jwk_as_bytes: Arc<RwLock<Vec<u8>>>,
 }
 
 /// The authority state encapsulates all state, drives execution, and ensures safety.
@@ -567,6 +573,52 @@ impl AuthorityState {
 
     pub fn committee_store(&self) -> &Arc<CommitteeStore> {
         &self.committee_store
+    }
+
+    pub fn get_google_jwk_as_bytes(&self) -> Vec<u8> {
+        match self.google_jwk_as_bytes.read() {
+            Ok(google_jwk_as_bytes) => google_jwk_as_bytes.clone(),
+            Err(_) => (*DEFAULT_GOOGLE_JWK_BYTES.clone()).to_vec(),
+        }
+    }
+
+    pub fn start_jwk_updater(self: Arc<Self>) {
+        debug!("Starting JWK updater thread for authority");
+        // other ideas to not pass jwk everywhere: pointer to the jwk object
+        // put jwk in a global instance and only access in zk login verify generic
+        tokio::task::spawn(async move {
+            loop {
+                // Update the JWK value in the authority server
+                let res = self.update_google_jwk().await;
+                if let Err(e) = res {
+                    debug!("Error when fetching JWK {:?}", e);
+                }
+                // Sleep for 1 hour
+                tokio::time::sleep(Duration::from_secs(3600)).await;
+            }
+        });
+    }
+
+    async fn update_google_jwk(&self) -> Result<(), SuiError> {
+        let client = Client::new();
+        let response = client
+            .get(OAuthProvider::Google.get_config().1)
+            .send()
+            .await
+            .map_err(|_| SuiError::JWKRetrievalError)?;
+        let bytes = response
+            .bytes()
+            .await
+            .map_err(|_| SuiError::JWKRetrievalError)?;
+        let mut jwk = self
+            .google_jwk_as_bytes
+            .write()
+            .map_err(|_| SuiError::JWKRetrievalError)?;
+        if jwk.to_vec() != bytes.to_vec() {
+            info!("New JWK value detected, updating...");
+            *jwk = bytes.to_vec();
+        }
+        Ok(())
     }
 
     pub fn clone_committee_store(&self) -> Arc<CommitteeStore> {
@@ -1943,6 +1995,9 @@ impl AuthorityState {
             transaction_deny_config,
             certificate_deny_config,
             debug_dump_config,
+            google_jwk_as_bytes: Arc::new(RwLock::new(
+                (*DEFAULT_GOOGLE_JWK_BYTES.clone()).to_vec(),
+            )),
         });
 
         // Start a task to execute ready certificates.
@@ -1958,6 +2013,7 @@ impl AuthorityState {
             .create_owner_index_if_empty(genesis_objects, &epoch_store)
             .expect("Error indexing genesis objects.");
 
+        state.clone().start_jwk_updater();
         state
     }
 
