@@ -55,6 +55,7 @@ use tracing::warn;
 mod crypto_tests;
 
 #[cfg(test)]
+#[cfg(feature = "test-utils")]
 #[path = "unit_tests/intent_tests.rs"]
 mod intent_tests;
 
@@ -926,18 +927,10 @@ pub trait SuiSignatureInner: Sized + ToFromBytes + PartialEq + Eq + Hash {
     const LENGTH: usize = Self::Sig::LENGTH + Self::PubKey::LENGTH + 1;
     const SCHEME: SignatureScheme = Self::PubKey::SIGNATURE_SCHEME;
 
-    fn get_verification_inputs(&self, author: SuiAddress) -> SuiResult<(Self::Sig, Self::PubKey)> {
-        // Is this signature emitted by the expected author?
-        let bytes = self.public_key_bytes();
-        let pk = Self::PubKey::from_bytes(bytes)
+    /// Returns the deserialized signature and deserialized pubkey.
+    fn get_verification_inputs(&self) -> SuiResult<(Self::Sig, Self::PubKey)> {
+        let pk = Self::PubKey::from_bytes(self.public_key_bytes())
             .map_err(|_| SuiError::KeyConversionError("Invalid public key".to_string()))?;
-
-        let received_addr = SuiAddress::from(&pk);
-        if received_addr != author {
-            return Err(SuiError::IncorrectSigner {
-                error: format!("Signature get_verification_inputs() failure. Author is {author}, received address is {received_addr}")
-            });
-        }
 
         // deserialize the signature
         let signature = Self::Sig::from_bytes(self.signature_bytes()).map_err(|_| {
@@ -1002,7 +995,22 @@ impl<S: SuiSignatureInner + Sized> SuiSignature for S {
         hasher.update(&bcs::to_bytes(&value).expect("Message serialization should not fail"));
         let digest = hasher.finalize().digest;
 
-        let (sig, pk) = &self.get_verification_inputs(author)?;
+        let (sig, pk) = &self.get_verification_inputs()?;
+        match self.scheme() {
+            SignatureScheme::ZkLoginAuthenticator => {} // Pass this check because zk login does not derive address from pubkey.
+            _ => {
+                let address = SuiAddress::from(pk);
+                if author != address {
+                    return Err(SuiError::IncorrectSigner {
+                        error: format!(
+                            "Incorrect signer, expected {:?}, got {:?}",
+                            author, address
+                        ),
+                    });
+                }
+            }
+        }
+
         pk.verify(&digest, sig)
             .map_err(|e| SuiError::InvalidSignature {
                 error: format!("Fail to verify user sig {}", e),
@@ -1635,8 +1643,9 @@ pub enum SignatureScheme {
     ED25519,
     Secp256k1,
     Secp256r1,
-    BLS12381, // This is currently not supported for user Sui Address.
     MultiSig,
+    BLS12381, // This is currently not supported for user Sui Address.
+    ZkLoginAuthenticator,
 }
 
 impl SignatureScheme {
@@ -1647,6 +1656,7 @@ impl SignatureScheme {
             SignatureScheme::Secp256r1 => 0x02,
             SignatureScheme::MultiSig => 0x03,
             SignatureScheme::BLS12381 => 0x04, // This is currently not supported for user Sui Address.
+            SignatureScheme::ZkLoginAuthenticator => 0x05,
         }
     }
 
@@ -1663,6 +1673,8 @@ impl SignatureScheme {
             0x01 => Ok(SignatureScheme::Secp256k1),
             0x02 => Ok(SignatureScheme::Secp256r1),
             0x03 => Ok(SignatureScheme::MultiSig),
+            0x04 => Ok(SignatureScheme::BLS12381),
+            0x05 => Ok(SignatureScheme::ZkLoginAuthenticator),
             _ => Err(SuiError::KeyConversionError(
                 "Invalid key scheme".to_string(),
             )),

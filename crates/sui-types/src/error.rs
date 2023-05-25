@@ -553,6 +553,9 @@ pub enum SuiError {
 
     #[error("Failed to perform file operation: {0}")]
     FileIOError(String),
+
+    #[error("Generic JWK error")]
+    JWKRetrievalError,
 }
 
 #[repr(u64)]

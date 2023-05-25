@@ -26,7 +26,7 @@ use serde_json::json;
 use std::collections::HashSet;
 use std::fs;
 use std::{convert::TryInto, env};
-use sui_types::zk_login_authenticator::find_jwk_by_kid;
+use sui_types::zk_login_util::find_jwk_by_kid;
 
 use sui_json_rpc_types::{
     SuiArgument, SuiExecutionResult, SuiExecutionStatus, SuiTransactionBlockEffectsAPI, SuiTypeTag,
