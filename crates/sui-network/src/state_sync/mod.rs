@@ -505,26 +505,17 @@ where
                 checkpoint.sequence_number()
             );
 
-            // See if the missing checkpoints are already in our store and quickly update our
-            // watermarks
-            let mut checkpoints_from_storage =
-                (next_sequence_number..=*checkpoint.sequence_number()).map(|n| {
-                    self.store
-                        .get_checkpoint_by_sequence_number(n)
-                        .expect("store operation should not fail")
-                });
-            while let Some(Some(checkpoint)) = checkpoints_from_storage.next() {
-                self.store
-                    .update_highest_synced_checkpoint(&checkpoint)
-                    .expect("store operation should not fail");
-                self.metrics
-                    .set_highest_verified_checkpoint(*checkpoint.sequence_number());
-                self.metrics
-                    .set_highest_synced_checkpoint(*checkpoint.sequence_number());
+            // Because checkpoint from consensus sends in order, when we have checkpoint n,
+            // we must have all of the checkpoints before n.
+            self.metrics
+                .set_highest_verified_checkpoint(*checkpoint.sequence_number());
+            // Should we also update highest_synced_checkpoint? Today we can only populate
+            // cf `full_checkpoint_content` from state sync. If we update highest_synced_checkpoint
+            // here we may not get a chance to populate that any more.
 
-                // We don't care if no one is listening as this is a broadcast channel
-                let _ = self.checkpoint_event_sender.send(checkpoint.clone());
-            }
+            // TODO maybe in CheckpointBuilder::write_checkpoints we also update
+            // `checkpoint_sequence_by_contents_digest` so we can bump
+            // highest_synced_checkpoint?
         }
     }
 
