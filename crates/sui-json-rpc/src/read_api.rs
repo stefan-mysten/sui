@@ -192,18 +192,19 @@ impl ReadApi {
             }
         }
 
+        let epoch_store = self.state.load_epoch_store_one_call_per_task();
         let state = self.state.clone();
         let digests_clone = digests.clone();
         let checkpoint_seq_list =
             state
-            .multi_get_transaction_checkpoint(&digests_clone)
+            .multi_get_transaction_checkpoint(&digests_clone, &epoch_store)
             .tap_err(
                 |err| debug!(digests=?digests_clone, "Failed to multi get checkpoint sequence number: {:?}", err))?;
         for ((_digest, cache_entry), seq) in temp_response
             .iter_mut()
             .zip(checkpoint_seq_list.into_iter())
         {
-            cache_entry.checkpoint_seq = seq.map(|(_, seq)| seq);
+            cache_entry.checkpoint_seq = seq;
         }
 
         let unique_checkpoint_numbers = temp_response
@@ -383,7 +384,6 @@ impl ReadApi {
             }
         }
 
-        let epoch_store = self.state.load_epoch_store_one_call_per_task();
         let converted_tx_block_resps = temp_response
             .into_iter()
             .map(|c| convert_to_response(c.1, &opts, epoch_store.module_cache()))
@@ -651,8 +651,8 @@ impl ReadApiServer for ReadApi {
             }
 
             let state = self.state.clone();
-            if let Some((_, seq)) = spawn_monitored_task!(async move{
-            state.get_transaction_checkpoint_sequence(&digest)
+            if let Some(seq) = spawn_monitored_task!(async move{
+            state.get_transaction_checkpoint_sequence(&digest, &state.load_epoch_store_one_call_per_task())
             .map_err(|e| {
                 error!("Failed to retrieve checkpoint sequence for transaction {digest:?} with error: {e:?}");
                 Error::from(e)

@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::time::Duration;
+use sui_core::authority::epoch_start_configuration::EpochFlag;
+use sui_core::authority::epoch_start_configuration::EpochStartConfigTrait;
 use sui_macros::sim_test;
 use test_utils::network::TestClusterBuilder;
 
@@ -21,7 +23,23 @@ async fn basic_checkpoints_integration_test() {
             .validator_node_handles()
             .into_iter()
             .all(|handle| {
-                handle.with(|node| node.is_transaction_executed_in_checkpoint(&digest).unwrap())
+                handle.with(|node| {
+                    let epoch_store = node.state().epoch_store_for_testing();
+                    if epoch_store
+                        .epoch_start_config()
+                        .flags()
+                        .contains(&EpochFlag::PerEpochFinalizedTransactions)
+                    {
+                        epoch_store
+                            .is_transaction_executed_in_checkpoint(&digest)
+                            .unwrap()
+                    } else {
+                        node.state()
+                            .database
+                            .is_transaction_executed_in_checkpoint(&digest)
+                            .unwrap()
+                    }
+                })
             });
         if all_included {
             // success

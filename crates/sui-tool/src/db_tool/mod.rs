@@ -7,6 +7,7 @@ use crate::db_tool::db_dump::{compact, print_table_metadata};
 use anyhow::bail;
 use clap::Parser;
 use std::path::{Path, PathBuf};
+use sui_core::authority::authority_per_epoch_store::AuthorityEpochTables;
 use sui_core::authority::authority_store_tables::AuthorityPerpetualTables;
 use sui_core::checkpoints::CheckpointStore;
 use sui_types::base_types::{EpochId, ObjectID, SequenceNumber};
@@ -326,6 +327,15 @@ pub fn reset_db_to_genesis(path: &Path) -> anyhow::Result<()> {
         None,
     );
     checkpoint_db.reset_db_for_execution_since_genesis()?;
+
+    let epoch_db = AuthorityEpochTables::open_tables_read_write(
+        path.join("store"),
+        MetricConf::default(),
+        None,
+        None,
+    );
+    epoch_db.reset_db_for_execution_since_genesis()?;
+
     Ok(())
 }
 

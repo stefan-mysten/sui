@@ -984,16 +984,17 @@ impl CheckpointBuilder {
                 {
                     continue;
                 }
-                let executed_epoch = self.state.database.get_transaction_checkpoint(digest)?;
-                if let Some((executed_epoch, _checkpoint)) = executed_epoch {
-                    // Skip here if transaction was executed in previous epoch
-                    //
-                    // Do not skip if transaction was executed in this epoch -
-                    // we rely on builder_included_transaction_in_checkpoint instead for current epoch
-                    // because execution can run ahead checkpoint builder
-                    if executed_epoch < self.epoch_store.epoch() {
-                        continue;
-                    }
+                // Skip here if transaction was not executed in this epoch
+                //
+                // Do not skip if transaction was executed in this epoch -
+                // we rely on builder_included_transaction_in_checkpoint instead for current epoch
+                // because execution can run ahead checkpoint builder
+                if self
+                    .state
+                    .get_transaction_checkpoint_sequence(digest, &self.epoch_store)?
+                    .is_none()
+                {
+                    continue;
                 }
                 for dependency in effect.dependencies().iter() {
                     if seen.insert(*dependency) {
