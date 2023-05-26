@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::utils::make_transaction;
-use crate::zk_login_util::{OAuthProvider, SupportedKeyClaim, DEFAULT_GOOGLE_JWK_BYTES};
+use crate::zk_login_util::DEFAULT_GOOGLE_JWK_BYTES;
 use crate::{
     base_types::SuiAddress,
     crypto::{get_key_pair_from_rng, DefaultHash, SignatureScheme, SuiKeyPair},
@@ -10,7 +10,9 @@ use crate::{
     zk_login_authenticator::{AddressParams, ProofPoints, PublicInputs, ZkLoginAuthenticator},
 };
 use fastcrypto::hash::HashFunction;
-use fastcrypto_zkp::bn254::zk_login::{big_int_str_to_bytes, AuxInputs};
+use fastcrypto_zkp::bn254::zk_login::{
+    big_int_str_to_bytes, AuxInputs, OAuthProvider, SupportedKeyClaim,
+};
 use rand::{rngs::StdRng, SeedableRng};
 use shared_crypto::intent::{Intent, IntentMessage};
 

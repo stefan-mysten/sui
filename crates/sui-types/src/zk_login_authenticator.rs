@@ -6,14 +6,14 @@ use crate::{
     crypto::{Signature, SignatureScheme, SuiSignature},
     error::SuiError,
     signature::{AuthenticatorTrait, AuxVerifyData},
-    zk_login_util::{find_jwk_by_kid, get_supported_claims, AddressParams, DEFAULT_WHITELIST},
+    zk_login_util::{find_jwk_by_kid, AddressParams, DEFAULT_WHITELIST},
 };
 use fastcrypto::rsa::Base64UrlUnpadded;
 use fastcrypto::rsa::Encoding as OtherEncoding;
 use fastcrypto::rsa::RSAPublicKey;
 use fastcrypto::rsa::RSASignature;
 use fastcrypto_zkp::bn254::zk_login::{
-    verify_groth16_with_fixed_vk, AuxInputs, ProofPoints, PublicInputs,
+    get_supported_claims, verify_groth16_with_fixed_vk, AuxInputs, ProofPoints, PublicInputs,
 };
 use once_cell::sync::OnceCell;
 use schemars::JsonSchema;
@@ -118,9 +118,9 @@ impl AuthenticatorTrait for ZkLoginAuthenticator {
                 error: "Unsupported claim".to_string(),
             });
         }
-        // println!("aux_inputs: {:?}", aux_inputs);
-        // println!("cal hash== {:?}", &aux_inputs.calculate_all_inputs_hash());
-        // println!("public== {:?}", self.public_inputs.get_all_inputs_hash());
+        println!("aux_inputs: {:?}", aux_inputs);
+        println!("cal hash== {:?}", &aux_inputs.calculate_all_inputs_hash());
+        println!("public== {:?}", self.public_inputs.get_all_inputs_hash());
 
         // Calculates the hash of all inputs equals to the one in public inputs.
         if aux_inputs.calculate_all_inputs_hash() != self.public_inputs.get_all_inputs_hash() {
@@ -135,14 +135,14 @@ impl AuthenticatorTrait for ZkLoginAuthenticator {
                 error: "Invalid JWT signature".to_string(),
             }
         })?;
-        // println!("parsed jwt sig");
+        println!("parsed jwt sig");
 
         // Parse the JWK content for the given provider from the bytes.
         let selected = find_jwk_by_kid(
             aux_inputs.get_kid(),
             &aux_verify_data.google_jwk_as_bytes.unwrap_or_default(),
         )?;
-        // println!("selected {:?}", selected);
+        println!("selected {:?}", selected);
 
         // Verify the JWT signature against one of OAuth provider public keys in the bulletin.
         // Since more than one JWKs are available in the bulletin, iterate and find the one with
@@ -172,12 +172,12 @@ impl AuthenticatorTrait for ZkLoginAuthenticator {
         .map_err(|_| SuiError::InvalidSignature {
             error: "Invalid RSA raw components".to_string(),
         })?;
-        // println!(
-        //     "&self.aux_inputs.get_jwt_hash()=={:?}",
-        //     &self.aux_inputs.get_jwt_hash()
-        // );
-        // println!("&sig=={:?}", &sig.0);
-        // println!("&pk=={:?}", &pk.0);
+        println!(
+            "&self.aux_inputs.get_jwt_hash()=={:?}",
+            &self.aux_inputs.get_jwt_hash()
+        );
+        println!("&sig=={:?}", &sig.0);
+        println!("&pk=={:?}", &pk.0);
 
         pk.verify_prehash(&self.aux_inputs.get_jwt_hash(), &sig)
             .map_err(|_| SuiError::InvalidSignature {
@@ -191,19 +191,19 @@ impl AuthenticatorTrait for ZkLoginAuthenticator {
                 error: "Invalid ephemeral public_key".to_string(),
             });
         }
-        // println!("verify get_eph_pub_key ok");
+        println!("verify get_eph_pub_key ok");
 
         // Verify the user signature over the intent message of the transaction data.
         if self
             .user_signature
-            .verify_secure(intent_msg, author)
+            .verify_secure(intent_msg, author, SignatureScheme::ZkLoginAuthenticator)
             .is_err()
         {
             return Err(SuiError::InvalidSignature {
                 error: "User signature verify failed".to_string(),
             });
         }
-        // println!("verify user sig ok");
+        println!("verify user sig ok");
 
         // Finally, verify the Groth16 proof against public inputs and proof points.
         // Verifying key is pinned in fastcrypto.

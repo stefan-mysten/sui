@@ -10,7 +10,10 @@ use fastcrypto::secp256k1::recoverable::Secp256k1Sig;
 use fastcrypto::traits::KeyPair;
 use fastcrypto_zkp::bn254::api::Bn254Fr;
 use fastcrypto_zkp::bn254::poseidon::PoseidonWrapper;
-use fastcrypto_zkp::bn254::zk_login::{big_int_str_to_bytes, AuxInputs, ProofPoints, PublicInputs};
+use fastcrypto_zkp::bn254::zk_login::OAuthProvider;
+use fastcrypto_zkp::bn254::zk_login::{
+    big_int_str_to_bytes, AuxInputs, ProofPoints, PublicInputs, SupportedKeyClaim,
+};
 use num_bigint::{BigInt, Sign};
 use rand::rngs::StdRng;
 use rand::SeedableRng;
@@ -35,7 +38,7 @@ use sui_types::multisig::{MultiSig, MultiSigPublicKey, ThresholdUnit, WeightUnit
 use sui_types::signature::GenericSignature;
 use sui_types::transaction::TransactionData;
 use sui_types::zk_login_authenticator::ZkLoginAuthenticator;
-use sui_types::zk_login_util::{AddressParams, OAuthProvider, SupportedKeyClaim};
+use sui_types::zk_login_util::AddressParams;
 use tracing::info;
 
 #[cfg(test)]
@@ -626,7 +629,6 @@ impl KeyToolCommand {
                     sig.encode_base64()
                 );
             }
-
         }
         Ok(())
     }

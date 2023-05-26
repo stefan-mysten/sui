@@ -965,7 +965,12 @@ pub trait SuiSignature: Sized + ToFromBytes {
     fn public_key_bytes(&self) -> &[u8];
     fn scheme(&self) -> SignatureScheme;
 
-    fn verify_secure<T>(&self, value: &IntentMessage<T>, author: SuiAddress) -> SuiResult<()>
+    fn verify_secure<T>(
+        &self,
+        value: &IntentMessage<T>,
+        author: SuiAddress,
+        scheme: SignatureScheme,
+    ) -> SuiResult<()>
     where
         T: Serialize;
 }
@@ -987,7 +992,12 @@ impl<S: SuiSignatureInner + Sized> SuiSignature for S {
         S::PubKey::SIGNATURE_SCHEME
     }
 
-    fn verify_secure<T>(&self, value: &IntentMessage<T>, author: SuiAddress) -> Result<(), SuiError>
+    fn verify_secure<T>(
+        &self,
+        value: &IntentMessage<T>,
+        author: SuiAddress,
+        scheme: SignatureScheme,
+    ) -> Result<(), SuiError>
     where
         T: Serialize,
     {
@@ -996,7 +1006,7 @@ impl<S: SuiSignatureInner + Sized> SuiSignature for S {
         let digest = hasher.finalize().digest;
 
         let (sig, pk) = &self.get_verification_inputs()?;
-        match self.scheme() {
+        match scheme {
             SignatureScheme::ZkLoginAuthenticator => {} // Pass this check because zk login does not derive address from pubkey.
             _ => {
                 let address = SuiAddress::from(pk);

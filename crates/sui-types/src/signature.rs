@@ -142,6 +142,6 @@ impl AuthenticatorTrait for Signature {
     where
         T: Serialize,
     {
-        self.verify_secure(value, author)
+        self.verify_secure(value, author, self.scheme())
     }
 }

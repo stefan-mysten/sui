@@ -2,10 +2,11 @@
 // Copyright (c) Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 use crate::error::SuiError;
+use fastcrypto_zkp::bn254::zk_login::OAuthProvider;
 use once_cell::sync::Lazy;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fmt, hash::Hash};
+use std::{collections::HashMap, hash::Hash};
 
 /// A whitelist of client_ids (i.e. the value of "aud" in cliams) for each provider
 pub static DEFAULT_WHITELIST: Lazy<HashMap<&str, Vec<&str>>> = Lazy::new(|| {
@@ -45,66 +46,6 @@ pub static DEFAULT_GOOGLE_JWK_BYTES: Lazy<Vec<u8>> = Lazy::new(|| {
         ]
       }"#.as_bytes().to_vec()
 });
-
-/// Supported OAuth providers. Must contain "openid" in "scopes_supported"
-/// and "public" for "subject_types_supported" instead of "pairwise".
-#[derive(Clone)]
-pub enum OAuthProvider {
-    Google, // https://accounts.google.com/.well-known/openid-configuration
-    Twitch, // https://id.twitch.tv/oauth2/.well-known/openid-configuration
-}
-
-impl OAuthProvider {
-    /// Returns a tuple of iss string and JWK endpoint string for the given provider.
-    pub fn get_config(&self) -> (&str, &str) {
-        match self {
-            OAuthProvider::Google => (
-                "https://accounts.google.com",
-                "https://www.googleapis.com/oauth2/v2/certs",
-            ),
-            OAuthProvider::Twitch => (
-                "https://id.twitch.tv/oauth2",
-                "https://id.twitch.tv/oauth2/keys",
-            ),
-        }
-    }
-
-    pub fn from_iss(iss: &str) -> Result<Self, SuiError> {
-        match iss {
-            "https://accounts.google.com" => Ok(Self::Google),
-            "https://id.twitch.tv/oauth2" => Ok(Self::Twitch),
-            _ => Err(SuiError::UnsupportedFeatureError {
-                error: "Provider not supported".to_string(),
-            }),
-        }
-    }
-}
-
-/// The claims in the body signed by OAuth provider that must
-/// be locally unique to the provider and cannot be reassigned.
-pub enum SupportedKeyClaim {
-    Sub,
-    Email,
-}
-
-impl fmt::Display for SupportedKeyClaim {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            SupportedKeyClaim::Email => write!(f, "email"),
-            SupportedKeyClaim::Sub => write!(f, "sub"),
-        }
-    }
-}
-
-pub fn get_supported_claims() -> Vec<String> {
-    let supported_claims: Vec<SupportedKeyClaim> =
-        vec![SupportedKeyClaim::Sub, SupportedKeyClaim::Email];
-
-    supported_claims
-        .iter()
-        .map(|claim| claim.to_string())
-        .collect()
-}
 
 /// Parameters for generating an address.
 #[derive(Serialize, Deserialize)]
