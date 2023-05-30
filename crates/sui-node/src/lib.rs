@@ -264,7 +264,7 @@ impl SuiNode {
             // an epoch and the SUI conservation check will fail. This also initialize
             // the expected_network_sui_amount table.
             store
-                .expensive_check_sui_conservation(epoch_store.move_vm())
+                .expensive_check_sui_conservation(epoch_store.executor())
                 .expect("SUI conservation check cannot fail at genesis");
         }
 

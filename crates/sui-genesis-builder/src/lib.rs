@@ -7,17 +7,16 @@ use fastcrypto::hash::HashFunction;
 use fastcrypto::traits::KeyPair;
 use move_binary_format::CompiledModule;
 use move_core_types::ident_str;
-use move_vm_runtime::move_vm::MoveVM;
 use shared_crypto::intent::{Intent, IntentMessage, IntentScope};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
-use sui_adapter::{adapter, programmable_transactions};
 use sui_config::genesis::{
     Genesis, GenesisCeremonyParameters, GenesisChainParameters, TokenDistributionSchedule,
     UnsignedGenesis,
 };
+use sui_execution::{self, Executor};
 use sui_framework::BuiltInFramework;
 use sui_protocol_config::{ProtocolConfig, ProtocolVersion};
 use sui_types::base_types::{
@@ -30,7 +29,6 @@ use sui_types::crypto::{
 };
 use sui_types::effects::{TransactionEffects, TransactionEvents};
 use sui_types::epoch_data::EpochData;
-use sui_types::execution_mode;
 use sui_types::gas::SuiGasStatus;
 use sui_types::gas_coin::GasCoin;
 use sui_types::governance::StakedSui;
@@ -803,46 +801,40 @@ fn create_genesis_transaction(
 
     // execute txn to effects
     let (effects, events, objects) = {
-        let mut store = sui_types::in_memory_storage::InMemoryStorage::new(Vec::new());
         let temporary_store = TemporaryStore::new(
-            &mut store,
+            InMemoryStorage::new(Vec::new()),
             InputObjects::new(vec![]),
             *genesis_transaction.digest(),
             protocol_config,
         );
 
-        let native_functions = sui_move_natives::all_natives(/* silent */ true);
-        let enable_move_vm_paranoid_checks = false;
-        let move_vm = std::sync::Arc::new(
-            adapter::new_move_vm(
-                native_functions,
-                protocol_config,
-                enable_move_vm_paranoid_checks,
-            )
-            .expect("We defined natives to not fail here"),
-        );
+        let silent = true;
+        let paranoid_checks = false;
+        let executor = sui_execution::executor(protocol_config, paranoid_checks, silent)
+            .expect("Creating an executor should not fail here");
 
+        let expensive_checks = false;
+        let certificate_deny_set = HashSet::new();
+        let shared_object_refs = vec![];
         let transaction_data = &genesis_transaction.data().intent_message().value;
         let (kind, signer, gas) = transaction_data.execution_parts();
-        let (inner_temp_store, effects, _execution_error) =
-            sui_adapter::execution_engine::execute_transaction_to_effects::<
-                execution_mode::Normal,
-                _,
-            >(
-                vec![],
-                temporary_store,
-                kind,
-                signer,
-                &gas,
-                *genesis_transaction.digest(),
-                Default::default(),
-                &move_vm,
-                SuiGasStatus::new_unmetered(protocol_config),
-                epoch_data,
+        let transaction_dependencies = BTreeSet::new();
+        let (inner_temp_store, effects, _execution_error) = executor
+            .execute_transaction_to_effects(
                 protocol_config,
                 metrics,
-                false, // enable_expensive_checks
-                &HashSet::new(),
+                expensive_checks,
+                &certificate_deny_set,
+                &epoch_data.epoch_id(),
+                epoch_data.epoch_start_timestamp(),
+                temporary_store,
+                shared_object_refs,
+                SuiGasStatus::new_unmetered(protocol_config),
+                &gas,
+                kind,
+                signer,
+                *genesis_transaction.digest(),
+                transaction_dependencies,
             );
         assert!(inner_temp_store.objects.is_empty());
         assert!(inner_temp_store.mutable_inputs.is_empty());
@@ -874,20 +866,16 @@ fn create_genesis_objects(
     let protocol_config =
         ProtocolConfig::get_for_version(ProtocolVersion::new(parameters.protocol_version));
 
-    let native_functions = sui_move_natives::all_natives(/* silent */ true);
+    let silent = true;
     // paranoid checks are a last line of defense for malicious code, no need to run them in genesis
-    let enable_move_vm_paranoid_checks = false;
-    let move_vm = adapter::new_move_vm(
-        native_functions.clone(),
-        &protocol_config,
-        enable_move_vm_paranoid_checks,
-    )
-    .expect("We defined natives to not fail here");
+    let paranoid_checks = false;
+    let executor = sui_execution::executor(&protocol_config, paranoid_checks, silent)
+        .expect("Creating an executor should not fail here");
 
     for system_package in BuiltInFramework::iter_system_packages() {
         process_package(
             &mut store,
-            &move_vm,
+            executor.as_ref(),
             genesis_ctx,
             &system_package.modules(),
             system_package.dependencies().to_vec(),
@@ -897,13 +885,16 @@ fn create_genesis_objects(
         .unwrap();
     }
 
-    for object in input_objects {
-        store.insert_object(object.to_owned());
+    {
+        let store = Arc::get_mut(&mut store).expect("only one reference to store");
+        for object in input_objects {
+            store.insert_object(object.to_owned());
+        }
     }
 
     generate_genesis_system_object(
         &mut store,
-        &move_vm,
+        executor.as_ref(),
         validators,
         genesis_ctx,
         parameters,
@@ -912,12 +903,13 @@ fn create_genesis_objects(
     )
     .unwrap();
 
+    let store = Arc::try_unwrap(store).expect("only one reference to store");
     store.into_inner().into_values().collect()
 }
 
 fn process_package(
-    store: &mut InMemoryStorage,
-    vm: &MoveVM,
+    store: &mut Arc<InMemoryStorage>,
+    executor: &dyn Executor,
     ctx: &mut TxContext,
     modules: &[CompiledModule],
     dependencies: Vec<ObjectID>,
@@ -957,7 +949,7 @@ fn process_package(
         .collect();
 
     let mut temporary_store = TemporaryStore::new(
-        &*store,
+        store.clone(),
         InputObjects::new(loaded_dependencies),
         ctx.digest(),
         protocol_config,
@@ -977,14 +969,12 @@ fn process_package(
         builder.command(Command::Publish(module_bytes, dependencies));
         builder.finish()
     };
-    programmable_transactions::execution::execute::<_, execution_mode::Genesis>(
+    executor.update_genesis_state(
         protocol_config,
         metrics,
-        vm,
         &mut temporary_store,
         ctx,
         &mut gas_status,
-        None,
         pt,
     )?;
 
@@ -992,14 +982,15 @@ fn process_package(
         written, deleted, ..
     } = temporary_store.into_inner();
 
+    let store = Arc::get_mut(store).expect("only one reference to store");
     store.finish(written, deleted);
 
     Ok(())
 }
 
 pub fn generate_genesis_system_object(
-    store: &mut InMemoryStorage,
-    move_vm: &MoveVM,
+    store: &mut Arc<InMemoryStorage>,
+    executor: &dyn Executor,
     genesis_validators: &[GenesisValidatorMetadata],
     genesis_ctx: &mut TxContext,
     genesis_chain_parameters: &GenesisChainParameters,
@@ -1011,7 +1002,7 @@ pub fn generate_genesis_system_object(
         genesis_chain_parameters.protocol_version,
     ));
     let mut temporary_store = TemporaryStore::new(
-        &*store,
+        store.clone(),
         InputObjects::new(vec![]),
         genesis_digest,
         &protocol_config,
@@ -1068,14 +1059,13 @@ pub fn generate_genesis_system_object(
         );
         builder.finish()
     };
-    programmable_transactions::execution::execute::<_, execution_mode::Genesis>(
+
+    executor.update_genesis_state(
         &protocol_config,
         metrics,
-        move_vm,
         &mut temporary_store,
         genesis_ctx,
         &mut SuiGasStatus::new_unmetered(&protocol_config),
-        None,
         pt,
     )?;
 
@@ -1083,6 +1073,7 @@ pub fn generate_genesis_system_object(
         written, deleted, ..
     } = temporary_store.into_inner();
 
+    let store = Arc::get_mut(store).expect("only one reference to store");
     store.finish(written, deleted);
 
     Ok(())
