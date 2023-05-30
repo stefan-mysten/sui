@@ -18,6 +18,11 @@ pub struct FaucetReceipt {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct BatchFaucetReceipt {
+    pub task: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct CoinInfo {
     pub amount: u64,
@@ -34,6 +39,14 @@ pub trait Faucet {
         recipient: SuiAddress,
         amounts: &[u64],
     ) -> Result<FaucetReceipt, FaucetError>;
+
+    /// Send `Coin<SUI>` of the specified amount to the recipient in a batch request
+    async fn batch_send(
+        &self,
+        id: Uuid,
+        recipient: SuiAddress,
+        amounts: &[u64],
+    ) -> Result<BatchFaucetReceipt, FaucetError>;
 }
 
 pub const DEFAULT_AMOUNT: u64 = 1_000_000_000;
