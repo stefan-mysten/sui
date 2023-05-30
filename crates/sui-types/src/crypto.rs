@@ -55,6 +55,7 @@ use tracing::warn;
 mod crypto_tests;
 
 #[cfg(test)]
+#[cfg(feature = "test-utils")]
 #[path = "unit_tests/intent_tests.rs"]
 mod intent_tests;
 
@@ -229,35 +230,6 @@ impl<'de> Deserialize<'de> for SuiKeyPair {
         use serde::de::Error;
         let s = String::deserialize(deserializer)?;
         <SuiKeyPair as EncodeDecodeBase64>::decode_base64(&s)
-            .map_err(|e| Error::custom(e.to_string()))
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, JsonSchema)]
-pub enum PublicKeyLegacy {
-    Ed25519(Ed25519PublicKeyAsBytes),
-    Secp256k1(Secp256k1PublicKeyAsBytes),
-    Secp256r1(Secp256r1PublicKeyAsBytes),
-}
-
-impl Serialize for PublicKeyLegacy {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let s = self.encode_base64();
-        serializer.serialize_str(&s)
-    }
-}
-
-impl<'de> Deserialize<'de> for PublicKeyLegacy {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        use serde::de::Error;
-        let s = String::deserialize(deserializer)?;
-        <PublicKeyLegacy as EncodeDecodeBase64>::decode_base64(&s)
             .map_err(|e| Error::custom(e.to_string()))
     }
 }

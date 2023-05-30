@@ -6,7 +6,6 @@ import { SIGNATURE_SCHEME_TO_FLAG, SerializedSignature, SignaturePubkeyPair, fro
 import { PublicKey } from './publickey';
 import { blake2b } from '@noble/hashes/blake2b';
 import { bytesToHex } from '@noble/hashes/utils';
-import RoaringBitmap32 from 'roaring/RoaringBitmap32';
 
 import { normalizeSuiAddress, SUI_ADDRESS_LENGTH } from '../types';
 import { Ed25519PublicKey, Secp256k1PublicKey, builder, fromB64 } from '..';
@@ -64,7 +63,7 @@ export function combinePartialSigs(
     threshold: threshold[0],
   };
 
-  const bitmap3 = new RoaringBitmap32();
+  const bitmap = new Uint8Array(pairs.length);
   let compressed_sigs: CompressedSignature[] = new Array(pairs.length);
   for (let i = 0; i < pairs.length; i++) {
     let parsed = fromSerializedSignature(pairs[i]);
@@ -78,7 +77,7 @@ export function combinePartialSigs(
     }
     for (let j = 0; j < pks.length; j++) {
       if (parsed.pubKey.equals(pks[j].pubKey)) {
-        bitmap3.add(j);
+        bitmap.set([j], i);
         break;
       }
     }
@@ -105,8 +104,7 @@ export function decodeMultiSig(signature: string): SignaturePubkeyPair[] {
     let res: SignaturePubkeyPair[] = new Array(multisig.sigs.length);
     for (let i = 0; i < multisig.sigs.length; i++) {
       let s: CompressedSignature = multisig.sigs[i];
-      let deserialized = RoaringBitmap32.deserialize(new Uint8Array(multisig.bitmap), true).toArray();
-      let pk_index = deserialized.at(i);
+      let pk_index = multisig.bitmap.at(i);
       let pk_bytes = Object.values(multisig.multisig_pk.pk_map[pk_index as number].pubKey)[0];
       const PublicKey = ("Ed25519" in s) ? Ed25519PublicKey : Secp256k1PublicKey;
       const scheme = ("Ed25519" in s) ? "Ed25519" : "Secp256k1";

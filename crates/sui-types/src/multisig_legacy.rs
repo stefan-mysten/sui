@@ -14,12 +14,12 @@ use fastcrypto::{
     hash::HashFunction,
     secp256k1::Secp256k1PublicKey,
     secp256r1::Secp256r1PublicKey,
-    traits::{ToFromBytes, VerifyingKey},
+    traits::{EncodeDecodeBase64, ToFromBytes, VerifyingKey},
 };
 use once_cell::sync::OnceCell;
 use roaring::RoaringBitmap;
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::{ser::SerializeSeq, Deserialize, Deserializer, Serialize, Serializer};
 use serde_with::serde_as;
 use shared_crypto::intent::IntentMessage;
 use std::{
@@ -48,7 +48,7 @@ pub struct MultiSigLegacy {
     #[serde_as(as = "SuiBitmap")]
     bitmap: RoaringBitmap,
     /// The public key encoded with each public key with its signature scheme used along with the corresponding weight.
-    multisig_pk: MultiSigPublicKey,
+    multisig_pk: MultiSigPublicKeyLegacy,
     /// A bytes representation of [struct MultiSigLegacy]. This helps with implementing [trait AsRef<[u8]>].
     #[serde(skip)]
     bytes: OnceCell<Vec<u8>>,
@@ -189,7 +189,7 @@ impl MultiSigLegacy {
     /// This combines a list of [enum Signature] `flag || signature || pk` to a MultiSig.
     pub fn combine(
         full_sigs: Vec<Signature>,
-        multisig_pk: MultiSigPublicKey,
+        multisig_pk: MultiSigPublicKeyLegacy,
     ) -> Result<Self, SuiError> {
         multisig_pk
             .validate()
@@ -234,7 +234,7 @@ impl MultiSigLegacy {
         Ok(())
     }
 
-    pub fn get_pk(&self) -> &MultiSigPublicKey {
+    pub fn get_pk(&self) -> &MultiSigPublicKeyLegacy {
         &self.multisig_pk
     }
 
@@ -276,17 +276,50 @@ impl FromStr for MultiSigLegacy {
 }
 
 /// The struct that contains the public key used for authenticating a MultiSig.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, JsonSchema, Serialize, Deserialize)]
 pub struct MultiSigPublicKeyLegacy {
     /// A list of public key and its corresponding weight.
-    pk_map: Vec<(PublicKeyLegacy, WeightUnit)>,
+    #[serde(serialize_with = "serialize_pk_map")]
+    #[serde(deserialize_with = "deserialize_pk_map")]
+    pk_map: Vec<(PublicKey, WeightUnit)>,
     /// If the total weight of the public keys corresponding to verified signatures is larger than threshold, the MultiSig is verified.
     threshold: ThresholdUnit,
 }
 
+fn serialize_pk_map<S>(pk_map: &[(PublicKey, WeightUnit)], serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    let pk_strings: Vec<String> = pk_map.iter().map(|(pk, _)| pk.encode_base64()).collect();
+
+    let mut seq = serializer.serialize_seq(Some(pk_strings.len()))?;
+    for pk_string in pk_strings {
+        seq.serialize_element(&pk_string)?;
+    }
+    seq.end()
+}
+
+fn deserialize_pk_map<'de, D>(deserializer: D) -> Result<Vec<(PublicKey, WeightUnit)>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    use serde::de::Error;
+    let pk_strings: Vec<String> = Vec::deserialize(deserializer)?;
+    let pk_map: Result<Vec<(PublicKey, WeightUnit)>, _> = pk_strings
+        .into_iter()
+        .map(|s| {
+            let pk = <PublicKey as EncodeDecodeBase64>::decode_base64(&s)
+                .map_err(|e| Error::custom(e.to_string()))?;
+            Ok((pk, WeightUnit::default()))
+        })
+        .collect();
+
+    pk_map
+}
+
 impl MultiSigPublicKeyLegacy {
     pub fn new(
-        pks: Vec<PublicKeyLegacy>,
+        pks: Vec<PublicKey>,
         weights: Vec<WeightUnit>,
         threshold: ThresholdUnit,
     ) -> Result<Self, SuiError> {
@@ -323,7 +356,7 @@ impl MultiSigPublicKeyLegacy {
         &self.threshold
     }
 
-    pub fn pubkeys(&self) -> &Vec<(PublicKey, WeightUnit)> {
+    pub fn pubkeys(&self) -> &[(PublicKey, WeightUnit)] {
         &self.pk_map
     }
 
@@ -342,22 +375,5 @@ impl MultiSigPublicKeyLegacy {
             return Err(FastCryptoError::InvalidInput);
         }
         Ok(())
-    }
-}
-
-/// This initialize the underlying bytes representation of MultiSig. It encodes
-/// [struct MultiSigLegacy] as the MultiSig flag (0x03) concat with the bcs bytes
-/// of [struct MultiSigLegacy] i.e. `flag || bcs_bytes(MultiSig)`.
-impl AsRef<[u8]> for MultiSigLegacy {
-    fn as_ref(&self) -> &[u8] {
-        self.bytes
-            .get_or_try_init::<_, eyre::Report>(|| {
-                let as_bytes = bcs::to_bytes(self).expect("BCS serialization should not fail");
-                let mut bytes = Vec::with_capacity(1 + as_bytes.len());
-                bytes.push(SignatureScheme::MultiSig.flag());
-                bytes.extend_from_slice(as_bytes.as_slice());
-                Ok(bytes)
-            })
-            .expect("OnceCell invariant violated")
     }
 }

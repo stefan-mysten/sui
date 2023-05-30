@@ -4,7 +4,6 @@
 use crate::{
     crypto::{CompressedSignature, DefaultHash, SignatureScheme},
     signature::AuthenticatorTrait,
-    sui_serde::SuiBitmap,
 };
 pub use enum_dispatch::enum_dispatch;
 use fastcrypto::{
@@ -17,7 +16,6 @@ use fastcrypto::{
     traits::{ToFromBytes, VerifyingKey},
 };
 use once_cell::sync::OnceCell;
-use roaring::RoaringBitmap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
@@ -107,7 +105,7 @@ impl AuthenticatorTrait for MultiSig {
             let (pk, weight) =
                 self.multisig_pk
                     .pk_map
-                    .get(i as usize)
+                    .get(*i as usize)
                     .ok_or(SuiError::InvalidSignature {
                         error: "Invalid public keys index".to_string(),
                     })?;
@@ -191,14 +189,20 @@ impl MultiSig {
         let mut sigs = Vec::with_capacity(full_sigs.len());
         for s in full_sigs {
             let pk = s.to_public_key()?;
-            bitmap.push(multisig_pk.get_index(&pk).ok_or(
-                SuiError::IncorrectSigner {
+            let index = multisig_pk
+                .get_index(&pk)
+                .ok_or(SuiError::IncorrectSigner {
                     error: format!("pk does not exist: {:?}", pk),
-                },
-            )?);
+                })?;
+            if bitmap.contains(&index) {
+                return Err(SuiError::InvalidSignature {
+                    error: "Duplicate public key".to_string(),
+                });
+            }
+            bitmap.push(index);
             sigs.push(s.to_compressed()?);
         }
-        Ok(MultiSigLegacy {
+        Ok(MultiSig {
             sigs,
             bitmap,
             multisig_pk,
@@ -222,7 +226,7 @@ impl MultiSig {
         &self.sigs
     }
 
-    pub fn get_bitmap(&self) -> &RoaringBitmap {
+    pub fn get_bitmap(&self) -> &[u8] {
         &self.bitmap
     }
 }
@@ -252,6 +256,23 @@ impl FromStr for MultiSig {
             error: "Invalid multisig bytes".to_string(),
         })?;
         Ok(sig)
+    }
+}
+
+/// This initialize the underlying bytes representation of MultiSig. It encodes
+/// [struct MultiSig] as the MultiSig flag (0x03) concat with the bcs bytes
+/// of [struct MultiSig] i.e. `flag || bcs_bytes(MultiSig)`.
+impl AsRef<[u8]> for MultiSig {
+    fn as_ref(&self) -> &[u8] {
+        self.bytes
+            .get_or_try_init::<_, eyre::Report>(|| {
+                let as_bytes = bcs::to_bytes(self).expect("BCS serialization should not fail");
+                let mut bytes = Vec::with_capacity(1 + as_bytes.len());
+                bytes.push(SignatureScheme::MultiSig.flag());
+                bytes.extend_from_slice(as_bytes.as_slice());
+                Ok(bytes)
+            })
+            .expect("OnceCell invariant violated")
     }
 }
 
@@ -292,11 +313,8 @@ impl MultiSigPublicKey {
         })
     }
 
-    pub fn get_index(&self, pk: &PublicKey) -> Option<u32> {
-        self.pk_map
-            .iter()
-            .position(|x| &x.0 == pk)
-            .map(|x| x as u32)
+    pub fn get_index(&self, pk: &PublicKey) -> Option<u8> {
+        self.pk_map.iter().position(|x| &x.0 == pk).map(|x| x as u8)
     }
 
     pub fn threshold(&self) -> &ThresholdUnit {

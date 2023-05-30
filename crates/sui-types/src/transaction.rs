@@ -57,6 +57,7 @@ pub const DEFAULT_VALIDATOR_GAS_PRICE: u64 = 1000;
 const BLOCKED_MOVE_FUNCTIONS: [(ObjectID, &str, &str); 0] = [];
 
 #[cfg(test)]
+#[cfg(feature = "test-utils")]
 #[path = "unit_tests/messages_tests.rs"]
 mod messages_tests;
 
@@ -1717,7 +1718,9 @@ impl VersionedProtocolMessage for SenderSignedData {
         // SuiError::WrongMessageVersion
         for sig in &self.inner().tx_signatures {
             match sig {
-                GenericSignature::MultiSig(_) | GenericSignature::Signature(_) => (),
+                GenericSignature::MultiSig(_)
+                | GenericSignature::Signature(_)
+                | GenericSignature::MultiSigLegacy(_) => (),
             }
         }
 

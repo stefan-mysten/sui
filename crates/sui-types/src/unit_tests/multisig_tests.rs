@@ -11,6 +11,7 @@ use crate::{
         SuiSignatureInner,
     },
     multisig::{MultiSig, MAX_SIGNER_IN_MULTISIG},
+    multisig_legacy::{MultiSigLegacy, MultiSigPublicKeyLegacy},
     signature::{AuthenticatorTrait, GenericSignature},
 };
 use fastcrypto::{
@@ -21,7 +22,6 @@ use fastcrypto::{
 };
 use once_cell::sync::OnceCell;
 use rand::{rngs::StdRng, SeedableRng};
-use roaring::RoaringBitmap;
 use shared_crypto::intent::{Intent, IntentMessage, PersonalMessage};
 
 pub fn keys() -> Vec<SuiKeyPair> {
@@ -92,8 +92,15 @@ fn multisig_scenarios() {
         3,
     )
     .unwrap();
+    let multisig_pk_legacy_2 = MultiSigPublicKeyLegacy::new(
+        vec![pk1.clone(), pk2.clone(), pk3.clone()],
+        vec![1, 2, 3],
+        3,
+    )
+    .unwrap();
     let addr_2 = SuiAddress::from(&multisig_pk_2);
-
+    let addr_legacy_2 = SuiAddress::from(&multisig_pk_legacy_2);
+    assert_eq!(addr_2, addr_legacy_2);
     // sig1 and sig2 (3 of 6) verifies ok.
     let multi_sig_6 =
         MultiSig::combine(vec![sig1.clone(), sig2.clone()], multisig_pk_2.clone()).unwrap();
@@ -102,10 +109,20 @@ fn multisig_scenarios() {
     // providing the same sig twice fails.
     assert!(MultiSig::combine(vec![sig1.clone(), sig1.clone()], multisig_pk_2.clone()).is_err());
 
-    // Change position for sig2 and sig1 fails.
+    // Change position for sig2 and sig1 is ok.
     let multi_sig_7 =
         MultiSig::combine(vec![sig2.clone(), sig1.clone()], multisig_pk_2.clone()).unwrap();
-    assert!(multi_sig_7.verify_secure_generic(&msg, addr_2).is_err());
+    assert!(multi_sig_7.verify_secure_generic(&msg, addr_2).is_ok());
+
+    // Change position for sig2 and sig1 is not ok with legacy using roaring bitmap.
+    let multi_sig_legacy_7 = MultiSigLegacy::combine(
+        vec![sig2.clone(), sig1.clone()],
+        multisig_pk_legacy_2.clone(),
+    )
+    .unwrap();
+    assert!(multi_sig_legacy_7
+        .verify_secure_generic(&msg, addr_2)
+        .is_err());
 
     // sig3 itself (3 of 6) verifies ok.
     let multi_sig_8 = MultiSig::combine(vec![sig3.clone()], multisig_pk_2.clone()).unwrap();
@@ -129,8 +146,8 @@ fn multisig_scenarios() {
     assert!(multi_sig_9.verify_secure_generic(&msg, addr_2).is_err());
 
     // Wrong bitmap verifies fail.
-    let mut bitmap = RoaringBitmap::new();
-    bitmap.insert(1);
+    let mut bitmap = Vec::new();
+    bitmap.push(1);
     let multi_sig_10 = MultiSig {
         sigs: vec![sig1.to_compressed().unwrap()], // sig1 has index 0
         bitmap,
@@ -200,7 +217,7 @@ fn test_serde_roundtrip() {
     };
     let multisig = MultiSig {
         sigs: vec![], // No sigs
-        bitmap: RoaringBitmap::new(),
+        bitmap: Vec::new(),
         multisig_pk,
         bytes: OnceCell::new(),
     };
@@ -217,7 +234,7 @@ fn test_serde_roundtrip() {
 
     let multisig_1 = MultiSig {
         sigs: vec![],
-        bitmap: RoaringBitmap::new(),
+        bitmap: Vec::new(),
         multisig_pk: multisig_pk_1,
         bytes: OnceCell::new(),
     };
@@ -379,8 +396,7 @@ fn multisig_address_consistency_test() {
     let pk1 = keys[0].public();
     let pk2 = keys[1].public();
 
-    let multisig_pk =
-        MultiSigPublicKey::new(vec![pk1, pk2.clone()], vec![2, 3], 4).unwrap();
+    let multisig_pk = MultiSigPublicKey::new(vec![pk1, pk2.clone()], vec![2, 3], 4).unwrap();
     let addr = SuiAddress::from(&multisig_pk);
     assert_eq!(
         addr,

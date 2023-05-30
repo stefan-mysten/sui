@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::crypto::{SignatureScheme, SuiSignature};
-use crate::multisig::MultiSigLegacy;
+use crate::multisig_legacy::MultiSigLegacy;
 use crate::{base_types::SuiAddress, crypto::Signature, error::SuiError, multisig::MultiSig};
 pub use enum_dispatch::enum_dispatch;
 use fastcrypto::{
@@ -34,6 +34,7 @@ pub trait AuthenticatorTrait {
 #[derive(Debug, Clone, PartialEq, Eq, JsonSchema, Hash)]
 pub enum GenericSignature {
     MultiSig,
+    MultiSigLegacy,
     Signature,
 }
 
@@ -53,10 +54,13 @@ impl ToFromBytes for GenericSignature {
                 | SignatureScheme::Secp256r1 => Ok(GenericSignature::Signature(
                     Signature::from_bytes(bytes).map_err(|_| FastCryptoError::InvalidSignature)?,
                 )),
-                SignatureScheme::MultiSig => {
-                    let multisig = MultiSigLegacy::from_bytes(bytes)?;
-                    Ok(GenericSignature::MultiSig(multisig))
-                }
+                SignatureScheme::MultiSig => match MultiSig::from_bytes(bytes) {
+                    Ok(multisig) => Ok(GenericSignature::MultiSig(multisig)),
+                    Err(_) => {
+                        let multisig = MultiSigLegacy::from_bytes(bytes)?;
+                        Ok(GenericSignature::MultiSigLegacy(multisig))
+                    }
+                },
                 _ => Err(FastCryptoError::InvalidInput),
             },
             Err(_) => Err(FastCryptoError::InvalidInput),
@@ -69,6 +73,7 @@ impl AsRef<[u8]> for GenericSignature {
     fn as_ref(&self) -> &[u8] {
         match self {
             GenericSignature::MultiSig(s) => s.as_ref(),
+            GenericSignature::MultiSigLegacy(s) => s.as_ref(),
             GenericSignature::Signature(s) => s.as_ref(),
         }
     }

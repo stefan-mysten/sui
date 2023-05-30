@@ -510,7 +510,7 @@ impl KeyToolCommand {
                 println!("{}", ["-"; 100].join(""));
                 for (sig, i) in sigs.iter().zip(bitmap) {
                     let (pk, w) = pks
-                        .get(i as usize)
+                        .get(*i as usize)
                         .ok_or(anyhow!("Invalid public keys index".to_string()))?;
                     println!(
                         " {0: ^45} | {1: ^45} | {2: ^6}",

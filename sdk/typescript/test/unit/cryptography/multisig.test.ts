@@ -5,7 +5,6 @@ import { describe, it, expect } from 'vitest';
 import { combinePartialSigs, decodeMultiSig, toMultiSigAddress } from '../../../src/cryptography/multisig';
 import { Ed25519Keypair, Ed25519PublicKey, Secp256k1Keypair, Secp256k1PublicKey, toSerializedSignature } from '../../../src';
 import { blake2b } from '@noble/hashes/blake2b';
-import { RoaringBitmap32 } from 'roaring';
 
 describe('to multisig address', () => {
   it('equals to rust impl', () => {
@@ -55,16 +54,5 @@ describe('combine partial multisig', () => {
     
     let decoded = decodeMultiSig(multisig);
     expect(decoded).toEqual([sig1, sig2]);
-  });
-
-  it('test', () => {
-    let f = new RoaringBitmap32();
-    f.add(0);
-    f.add(1);
-    console.log(f.toArray());
-
-    let d = Array.from(f.serialize(true).map((x) => Number(x)));
-    console.log(d);
-    expect(d).toEqual([58, 48, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 16, 0, 0, 0, 0, 0, 1, 0]);
   });
 });
