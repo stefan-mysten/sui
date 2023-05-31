@@ -17,12 +17,14 @@ export interface AddressInputProps {
     disabled?: boolean;
     placeholder?: string;
     name: string;
+    'data-testid'?: string;
 }
 
 export function AddressInput({
     disabled: forcedDisabled,
     placeholder = '0x...',
     name = 'to',
+    'data-testid': testId,
 }: AddressInputProps) {
     const [field, meta] = useField(name);
 
@@ -59,6 +61,7 @@ export function AddressInput({
             >
                 <div className="min-h-[42px] w-full flex items-center pl-3 py-1">
                     <TextareaAutosize
+                        data-testid={testId}
                         maxRows={3}
                         minRows={1}
                         disabled={disabled}

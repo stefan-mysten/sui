@@ -29,10 +29,14 @@ function MenuListItem({
             className="flex flex-nowrap items-center px-1 py-4.5 first:pt-3 last:pb-3 gap-5 no-underline overflow-hidden group cursor-pointer"
             to={to}
             onClick={onClick}
+            data-testid={title}
         >
             <div className="flex flex-nowrap flex-1 gap-2 items-center overflow-hidden basis-3/5">
                 <div className="flex text-steel text-2xl flex-none">{icon}</div>
-                <div className="flex-1 text-gray-90 text-body font-semibold truncate">
+                <div
+                    data-testid="meme"
+                    className="flex-1 text-gray-90 text-body font-semibold truncate"
+                >
                     {title}
                 </div>
             </div>

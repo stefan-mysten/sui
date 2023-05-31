@@ -283,6 +283,7 @@ export function SendTokenForm({
                                         </div>
 
                                         <InputWithAction
+                                            data-testid="coin-amount-input"
                                             type="numberInput"
                                             name="amount"
                                             placeholder="0.00"
@@ -345,6 +346,7 @@ export function SendTokenForm({
                                                 component={AddressInput}
                                                 name="to"
                                                 placeholder="Enter Address"
+                                                data-testid="address-input"
                                             />
                                         </div>
                                     </div>

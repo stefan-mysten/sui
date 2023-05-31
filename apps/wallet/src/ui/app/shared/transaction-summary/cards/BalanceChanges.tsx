@@ -66,7 +66,10 @@ export function BalanceChanges({ changes }: BalanceChangesProps) {
                     }
                     footer={<OwnerFooter owner={owner} />}
                 >
-                    <div className="flex flex-col gap-4 pb-3">
+                    <div
+                        data-testid="balance-changes"
+                        className="flex flex-col gap-4 pb-3"
+                    >
                         {changes.map((change) => (
                             <BalanceChangeEntry
                                 change={change}
