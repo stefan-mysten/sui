@@ -58,12 +58,23 @@ pub async fn start_console(
     )?;
 
     if !client.available_rpc_methods().is_empty() {
-        writeln!(out)?;
-        writeln!(
-            out,
-            "Available RPC methods: {:?}",
-            client.available_rpc_methods()
-        )?;
+        writeln!(out, "{}", "Available RPC methods. Each is a link (might not be clickable depending on your shell) to the JSON-RPC documentation")?;
+        let rpc_methods = client.available_rpc_methods();
+        let sui_rpc_methods = rpc_methods.into_iter().filter(|x| x.starts_with("sui_")).map(|x| x.to_string()).collect::<Vec<_>>();//#.join("\n");
+        let suix_rpc_methods = rpc_methods.into_iter().filter(|x| x.starts_with("suix_")).map(|x| x.to_string()).collect::<Vec<_>>();//.join("\n");
+        let unsafe_rpc_methods = rpc_methods.into_iter().map(|x| x.as_str()).filter(|x| x.starts_with("unsafe_")).map(|x| x.to_string()).collect::<Vec<_>>();//'.join("\n");
+        
+        // SUI
+        let sui_table = build_tables("RPC Sui", sui_rpc_methods);
+        // SUIX
+        let suix_table = build_tables("RPC Suix", suix_rpc_methods);
+        // UNSAFE 
+        let rpc_unsafe = build_tables("RPC Unsafe", unsafe_rpc_methods);
+
+        let mut table: tabled::Table = tabled::row![sui_table, suix_table, rpc_unsafe];
+        table.with(tabled::settings::Style::sharp());
+        
+        writeln!(out, "{}", table.to_string())?;
     }
     if !client.available_subscriptions().is_empty() {
         writeln!(out)?;
@@ -86,6 +97,22 @@ pub async fn start_console(
     );
 
     shell.run_async(out, err).await
+}
+
+fn build_tables(colname: &str, records: Vec<String>) -> tabled::Table {
+        let mut builder = tabled::builder::Builder::default();
+        builder.set_header(vec![colname]);
+        for r in records {
+            builder.push_record(vec![format_osc8_hyperlink(&r, &r)]);
+        }
+        let mut table = builder.build();
+        table.with(tabled::settings::Style::sharp())
+        .with(tabled::settings::Alignment::left());
+        table
+}
+
+fn format_osc8_hyperlink(url: &str, text: &str) -> String {
+    format!("\x1b]8;;https://docs.sui.io/sui-jsonrpc#{url}\x1b\\{text}\x1b]8;;\x1b\\",)
 }
 
 struct ClientCommandHandler;

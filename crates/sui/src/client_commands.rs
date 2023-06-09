@@ -8,6 +8,7 @@ use std::{
     sync::Arc,
 };
 
+use json_to_table::{json_to_table, Orientation};
 use anyhow::{anyhow, ensure};
 use bip32::DerivationPath;
 use clap::*;
@@ -624,7 +625,7 @@ impl SuiClientCommands {
         self,
         context: &mut WalletContext,
     ) -> Result<SuiClientCommandResult, anyhow::Error> {
-        let ret = Ok(match self {
+        let ret: std::result::Result<SuiClientCommandResult, anyhow::Error> = Ok(match self {
             SuiClientCommands::Upgrade {
                 package_path,
                 upgrade_capability,
@@ -1359,8 +1360,15 @@ impl Display for SuiClientCommandResult {
                 write!(writer, "{}", write_transaction_response(response)?)?;
             }
             SuiClientCommandResult::Object(object_read) => {
-                let object = unwrap_err_to_string(|| Ok(object_read.object()?));
-                writeln!(writer, "{}", object)?;
+                match object_read.object() {
+                    Ok(obj) => {
+                        let table = json_to_table(&json![obj]).array_orientation(Orientation::Column).with(tabled::settings::Style::sharp()).to_string();
+                        writeln!(writer, "{}", table)?;
+                    }
+                    Err(e) => {
+                        writeln!(writer, "{}", e)?;
+                    }
+                }
             }
             SuiClientCommandResult::TransactionBlock(response) => {
                 write!(writer, "{}", write_transaction_response(response)?)?;
@@ -1419,51 +1427,69 @@ impl Display for SuiClientCommandResult {
                 write!(writer, "{}", write_transaction_response(response)?)?;
             }
             SuiClientCommandResult::Addresses(addresses, active_address) => {
-                writeln!(writer, "Showing {} results.", addresses.len())?;
-                for address in addresses {
-                    if *active_address == Some(*address) {
-                        writeln!(writer, "{} <=", address)?;
-                    } else {
-                        writeln!(writer, "{}", address)?;
+                let mut builder = tabled::builder::Builder::default();
+                if active_address.is_some() {
+                    for address in addresses {
+                        if address == &active_address.unwrap() {
+                            builder.push_record(vec![address.to_string(), "active".to_string()]);
+
+                        } else {
+                            builder.push_record(vec![address.to_string(), "".to_string()]);
+                        }
+                        
+                    }
+                } else {
+                    for address in addresses {
+                        builder.push_record(vec![address.to_string(), "".to_string()]);
                     }
                 }
+                let columns = vec!["Sui Address".to_string(), "Active".to_string()];
+                builder.set_header(columns);
+                let mut table = builder.build();
+                table.with(tabled::settings::Style::sharp());
+
+                println!("{}", table);
+               
             }
             SuiClientCommandResult::Objects(object_refs) => {
-                writeln!(
-                    writer,
-                    " {0: ^42} | {1: ^10} | {2: ^44} | {3: ^15} | {4: ^40}",
-                    "Object ID", "Version", "Digest", "Owner Type", "Object Type"
-                )?;
-                writeln!(writer, "{}", ["-"; 165].join(""))?;
+      
+                let cols = vec!["Object ID", "Version", "Digest", "Owner Type", "Object Type"];
+                let mut builder = tabled::builder::Builder::default();
+                let mut json_array: Vec<Value> = vec![];
+                builder.set_header(cols);
                 for oref in object_refs {
                     let obj = oref.clone().into_object();
                     match obj {
                         Ok(obj) => {
-                            let owner_type = match obj.owner {
-                                Some(Owner::AddressOwner(_)) => "AddressOwner",
-                                Some(Owner::ObjectOwner(_)) => "object_owner",
-                                Some(Owner::Shared { .. }) => "Shared",
-                                Some(Owner::Immutable) => "Immutable",
-                                None => "None",
-                            };
-
-                            writeln!(
-                                writer,
-                                " {0: ^42} | {1: ^10} | {2: ^44} | {3: ^15} | {4: ^40}",
-                                obj.object_id,
-                                obj.version.value(),
-                                Base64::encode(obj.digest),
-                                owner_type,
-                                format!("{:?}", obj.type_)
-                            )?
+                            let json_value = serde_json::json!(obj);
+                            json_array.push(json_value);
+                            // let owner_type = match obj.owner {
+                            //     Some(Owner::AddressOwner(_)) => "AddressOwner",
+                            //     Some(Owner::ObjectOwner(_)) => "object_owner",
+                            //     Some(Owner::Shared { .. }) => "Shared",
+                            //     Some(Owner::Immutable) => "Immutable",
+                            //     None => "None",
+                            // };
+                            // let obj_id = obj.object_id;
+                            // builder.push_record(vec![obj_id.to_string() ,
+                            //     obj.version.value().to_string(),
+                            //     Base64::encode(obj.digest),
+                            //     owner_type.to_string(),
+                            //     format!("{:?}", obj.type_)]);
+                          
                         }
                         Err(e) => writeln!(writer, "Error: {e:?}")?,
                     }
                 }
-                writeln!(writer, "Showing {} results.", object_refs.len())?;
+                let json_table = Value::Array(json_array);
+                // let table = json_to_table(&json_table).collapse().to_string();
+                let table = json_to_table(&json_table).array_orientation(Orientation::Column).with(tabled::settings::Style::sharp()).to_string();
+                // let mut table = builder.build();
+                // table.with(tabled::settings::Style::sharp());
+                writeln!(writer, "{}", table)?;
             }
             SuiClientCommandResult::DynamicFieldQuery(df_refs) => {
-                let mut table: Table = table!([
+                let mut table: Table = prettytable::table!([
                     "Name",
                     "Type",
                     "Object Type",
@@ -1527,10 +1553,21 @@ impl Display for SuiClientCommandResult {
                 write!(writer, "{}", response)?;
             }
             SuiClientCommandResult::ActiveAddress(response) => {
-                match response {
-                    Some(r) => write!(writer, "{}", r)?,
-                    None => write!(writer, "None")?,
+                let address = if let Some(response) = response {
+                    response.to_string()
+                } else {
+                    "".to_string()
                 };
+                let mut builder = tabled::builder::Builder::default();
+                builder.set_header(vec!["Sui Active Address"]);
+                builder.push_record(vec![address]); 
+                let mut table = builder.build();
+                table.with(tabled::settings::Style::sharp());
+                write!(writer, "{}", table.to_string());
+                // match response {
+                //     Some(r) => write!(writer, "{}", r)?,
+                //     None => write!(writer, "None")?,
+                // };
             }
             SuiClientCommandResult::ExecuteSignedTx(response) => {
                 write!(writer, "{}", write_transaction_response(response)?)?;
@@ -1639,6 +1676,11 @@ fn convert_number_to_string(value: Value) -> Value {
         _ => value,
     }
 }
+
+
+// fn table_transaction_response(response: &SuiTransactionBlockResponse) -> tabled::Table {
+
+// }
 
 // TODO(chris): only print out the full response when `--verbose` is provided
 pub fn write_transaction_response(

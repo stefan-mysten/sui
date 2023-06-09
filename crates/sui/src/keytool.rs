@@ -20,6 +20,7 @@ use rand::SeedableRng;
 use rusoto_core::Region;
 use rusoto_kms::{Kms, KmsClient, SignRequest};
 use shared_crypto::intent::{Intent, IntentMessage};
+use tabled::settings::Style;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -40,6 +41,7 @@ use sui_types::transaction::TransactionData;
 use sui_types::zk_login_authenticator::ZkLoginAuthenticator;
 use sui_types::zk_login_util::AddressParams;
 use tracing::info;
+use tabled::builder::Builder;
 
 #[cfg(test)]
 #[path = "unit_tests/keytool_tests.rs"]
@@ -288,19 +290,20 @@ impl KeyToolCommand {
                 store_and_print_keypair((&keypair.public()).into(), keypair)
             }
             KeyToolCommand::List => {
-                println!(
-                    " {0: ^42} | {1: ^45} | {2: ^6}",
-                    "Sui Address", "Public Key (Base64)", "Scheme"
-                );
-                println!("{}", ["-"; 100].join(""));
+                let mut builder = Builder::default();
+                let columns = vec!["Sui Address", "Public Key (Base64)", "Scheme"];
+                builder.set_header(columns);
                 for pub_key in keystore.keys() {
-                    println!(
-                        " {0: ^42} | {1: ^45} | {2: ^6}",
-                        Into::<SuiAddress>::into(&pub_key),
-                        pub_key.encode_base64(),
-                        pub_key.scheme().to_string()
-                    );
+
+                    builder.push_record(vec![Into::<SuiAddress>::into(&pub_key).to_string(),
+                    pub_key.encode_base64().to_string(),
+                    pub_key.scheme().to_string()]);
                 }
+                let mut table = builder.build();
+                table.with(Style::sharp());
+
+                println!("{}", table);
+
             }
             KeyToolCommand::Sign {
                 address,

@@ -31,6 +31,8 @@ prometheus = "0.13.3"
 git-version = "0.3.5"
 const-str = "0.5.3"
 num-bigint = "0.4.3"
+tabled = { version = "*", features = ["color"] } 
+json_to_table = "*"
 
 move-bytecode-verifier = { path = "../../external-crates/move/move-bytecode-verifier" }
 sui-adapter = { path = "../../sui-execution/latest/sui-adapter", package = "sui-adapter-latest" }
