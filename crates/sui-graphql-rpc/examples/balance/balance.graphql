@@ -1,0 +1,23 @@
+query TotalBalance{
+  address(
+    address: "0x1d632d46ff70491033fefc4e6398dceaa4943dcf62512b4d57378b5ab703bc5e"
+  ) {
+    balance {
+      totalBalance
+      coinObjectCount
+    }
+    
+  }
+}
+
+query BalanceEdges {
+  address(address:"0x1d632d46ff70491033fefc4e6398dceaa4943dcf62512b4d57378b5ab703bc5e"){
+    balanceConnection {
+      edges {
+        node {
+          coinObjectCount
+        }
+      }
+    }
+  }
+}
