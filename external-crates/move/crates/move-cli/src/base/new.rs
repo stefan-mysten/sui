@@ -1,8 +1,10 @@
 // Copyright (c) The Move Contributors
 // SPDX-License-Identifier: Apache-2.0
 
+use anyhow::anyhow;
 use clap::*;
 use move_package::source_package::layout::SourcePackageLayout;
+use regex::Regex;
 use std::{
     fmt::Display,
     fs::create_dir_all,
@@ -21,6 +23,8 @@ pub const MOVE_STDLIB_ADDR_VALUE: &str = "0x1";
 
 /// Create a new Move package with name `name` at `path`. If `path` is not provided the package
 /// will be created in the directory `name`.
+///
+/// By default, this command allows a strict naming scheme based on this regex: [A-Za-z][0-9A-Za-z_]*, and it will replace hyphens (-) with underscore (_) in the package name and address in the Move.toml file.
 #[derive(Parser)]
 #[clap(name = "new")]
 pub struct New {
@@ -49,6 +53,19 @@ impl New {
     ) -> anyhow::Result<()> {
         // TODO warn on build config flags
         let Self { name } = self;
+
+        let valid_identifier_re = match Regex::new(r"^[A-Za-z][A-Za-z\_\-]*$") {
+            Ok(re) => re,
+            Err(_) => {
+                return Err(anyhow!(
+                    "Cannot build the regex needed to validate package naming"
+                ));
+            }
+        };
+
+        if !valid_identifier_re.is_match(name.as_str()) {
+            return Err(anyhow!("Invalid package naming: a valid package name must start with a letter and can contain only letters, hyphens (-), or underscores (_)."));
+        }
         let p: PathBuf;
         let path: &Path = match path {
             Some(path) => {
@@ -59,6 +76,8 @@ impl New {
         };
         create_dir_all(path.join(SourcePackageLayout::Sources.path()))?;
         let mut w = std::fs::File::create(path.join(SourcePackageLayout::Manifest.path()))?;
+        let name = name.to_string();
+        let name = name.trim().replace('-', "_");
         writeln!(
             &mut w,
             "[package]
@@ -77,6 +96,8 @@ version = \"{version}\"
 [addresses]"
         )?;
         for (addr_name, addr_val) in addrs {
+            let addr_name = addr_name.to_string();
+            let addr_name = addr_name.trim().replace('-', "_");
             writeln!(w, "{addr_name} = \"{addr_val}\"")?;
         }
         if !custom.is_empty() {
