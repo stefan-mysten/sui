@@ -1,7 +1,7 @@
 // Copyright (c) The Move Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use anyhow::anyhow;
+use anyhow::{anyhow, ensure};
 use clap::*;
 use move_package::source_package::layout::SourcePackageLayout;
 use regex::Regex;
@@ -54,18 +54,11 @@ impl New {
         // TODO warn on build config flags
         let Self { name } = self;
 
-        let valid_identifier_re = match Regex::new(r"^[A-Za-z][A-Za-z\_\-]*$") {
-            Ok(re) => re,
-            Err(_) => {
-                return Err(anyhow!(
-                    "Cannot build the regex needed to validate package naming"
-                ));
-            }
-        };
+        let valid_identifier_re = Regex::new(r"^[A-Za-z][A-Za-z\_\-]*$")
+            .map_err(|_| anyhow!("Cannot build the regex needed to validate package naming"))?;
 
-        if !valid_identifier_re.is_match(name.as_str()) {
-            return Err(anyhow!("Invalid package naming: a valid package name must start with a letter and can contain only letters, hyphens (-), or underscores (_)."));
-        }
+        ensure!(valid_identifier_re.is_match(&name), "Invalid package naming: a valid package name must start with a letter and can contain only letters, hyphens (-), or underscores (_).");
+
         let p: PathBuf;
         let path: &Path = match path {
             Some(path) => {
@@ -76,7 +69,6 @@ impl New {
         };
         create_dir_all(path.join(SourcePackageLayout::Sources.path()))?;
         let mut w = std::fs::File::create(path.join(SourcePackageLayout::Manifest.path()))?;
-        let name = name.to_string();
         let name = name.trim().replace('-', "_");
         writeln!(
             &mut w,
