@@ -54,10 +54,13 @@ impl New {
         // TODO warn on build config flags
         let Self { name } = self;
 
-        let valid_identifier_re = Regex::new(r"^[A-Za-z][A-Za-z\_\-]*$")
+        let valid_identifier_re = Regex::new(r"^[A-Za-z][A-Za-z\_\-0-9]*$")
             .map_err(|_| anyhow!("Cannot build the regex needed to validate package naming"))?;
 
-        ensure!(valid_identifier_re.is_match(&name), "Invalid package naming: a valid package name must start with a letter and can contain only letters, hyphens (-), or underscores (_).");
+        ensure!(
+            valid_identifier_re.is_match(&name),
+            "Invalid package naming: a valid package name must start with a letter and can contain only letters, numbers, hyphens (-), or underscores (_)."
+        );
 
         let p: PathBuf;
         let path: &Path = match path {
@@ -69,7 +72,6 @@ impl New {
         };
         create_dir_all(path.join(SourcePackageLayout::Sources.path()))?;
         let mut w = std::fs::File::create(path.join(SourcePackageLayout::Manifest.path()))?;
-        let name = name.trim().replace('-', "_");
         writeln!(
             &mut w,
             "[package]
