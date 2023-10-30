@@ -54,7 +54,7 @@ impl New {
         // TODO warn on build config flags
         let Self { name } = self;
 
-        let valid_identifier_re = Regex::new(r"^[A-Za-z][A-Za-z\_\-0-9]*$")
+        let valid_identifier_re = Regex::new(r"^[A-Za-z][A-Za-z0-9-_]*$")
             .map_err(|_| anyhow!("Cannot build the regex needed to validate package naming"))?;
 
         ensure!(
