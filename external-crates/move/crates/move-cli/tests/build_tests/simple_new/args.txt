@@ -3,3 +3,12 @@ new P1
 
 new P2 -p other_dir
 > cat other_dir/Move.toml
+
+new Move_Package-Test123
+> cat Move_Package-Test123/Move.toml
+
+new _P
+
+new P_!
+
+new 1P
