@@ -1708,6 +1708,7 @@ impl TryFrom<StoredCheckpoint> for Checkpoint {
         });
 
         Ok(Self {
+            id: ID(c.sequence_number.to_string()),
             digest: Digest::try_from(c.checkpoint_digest)?.to_string(),
             sequence_number: c.sequence_number as u64,
             timestamp: DateTime::from_ms(c.timestamp_ms),
@@ -1842,6 +1843,7 @@ impl TryFrom<StoredObject> for Object {
         );
 
         Ok(Self {
+            id: ID(object_id.to_string()),
             address: SuiAddress::from_array(***object_id),
             version,
             digest: digest.base58_encode(),

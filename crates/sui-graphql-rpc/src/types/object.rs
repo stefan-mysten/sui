@@ -20,6 +20,7 @@ use sui_types::object::{Data as NativeSuiObjectData, Object as NativeSuiObject};
 
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub(crate) struct Object {
+    pub id: ID,
     pub address: SuiAddress,
     pub version: u64,
     pub digest: String,
@@ -261,6 +262,7 @@ impl From<&NativeSuiObject> for Object {
         );
 
         Self {
+            id: ID(o.id().to_string()),
             address: SuiAddress::from_array(o.id().into_bytes()),
             version: o.version().into(),
             digest: o.digest().base58_encode(),

@@ -22,7 +22,7 @@ pub(crate) struct CheckpointId {
 #[derive(Clone, Debug, PartialEq, Eq, SimpleObject)]
 #[graphql(complex)]
 pub(crate) struct Checkpoint {
-    // id: ID1,
+    pub id: ID,
     pub digest: String,
     pub sequence_number: u64,
     pub timestamp: Option<DateTime>,
