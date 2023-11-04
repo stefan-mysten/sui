@@ -301,21 +301,17 @@ impl Display for SuiTransactionBlockKind {
         let mut writer = String::new();
         match &self {
             Self::ChangeEpoch(e) => {
-                writeln!(writer, "Transaction Kind : Epoch Change")?;
-                writeln!(writer, "New epoch ID : {}", e.epoch)?;
-                writeln!(writer, "Storage gas reward : {}", e.storage_charge)?;
-                writeln!(writer, "Computation gas reward : {}", e.computation_charge)?;
-                writeln!(writer, "Storage rebate : {}", e.storage_rebate)?;
-                writeln!(writer, "Timestamp : {}", e.epoch_start_timestamp_ms)?;
+                writeln!(writer, "Transaction Kind: Epoch Change")?;
+                writeln!(writer, " ┌──\n │ New epoch ID: {} \n │ Storage gas reward: {} \n │ Computation gas reward: {} \n │ Storage rebate: {}\n │ Timestamp {}\n └──", e.epoch, e.storage_charge, e.computation_charge, e.storage_rebate, e.epoch_start_timestamp_ms)?;
             }
             Self::Genesis(_) => {
-                writeln!(writer, "Transaction Kind : Genesis Transaction")?;
+                writeln!(writer, "Transaction Kind: Genesis Transaction")?;
             }
             Self::ConsensusCommitPrologue(p) => {
-                writeln!(writer, "Transaction Kind : Consensus Commit Prologue")?;
+                writeln!(writer, "Transaction Kind: Consensus Commit Prologue")?;
                 writeln!(
                     writer,
-                    "Epoch: {}, Round: {}, Timestamp : {}",
+                    " ┌──\n │ Epoch: {} \n │ Round: {} \n │ Timestamp: {}\n └──",
                     p.epoch, p.round, p.commit_timestamp_ms
                 )?;
             }
@@ -1252,7 +1248,10 @@ pub struct SuiProgrammableTransactionBlock {
 impl Display for SuiProgrammableTransactionBlock {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let Self { inputs, commands } = self;
-        writeln!(f, "Inputs: {inputs:?}")?;
+        writeln!(f, "Inputs:")?;
+        for input in inputs {
+            writeln!(f, "{input}")?;
+        }
         writeln!(f, "Commands: [")?;
         for c in commands {
             writeln!(f, "  {c},")?;
@@ -1377,7 +1376,7 @@ pub enum SuiCommand {
 }
 
 impl Display for SuiCommand {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::MoveCall(p) => {
                 write!(f, "MoveCall({p})")
@@ -1745,6 +1744,19 @@ impl SuiCallArg {
     }
 }
 
+impl Display for SuiCallArg {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            SuiCallArg::Pure(pure) => {
+                writeln!(f, " ┌──\n │ {} \n └──", pure)
+            }
+            SuiCallArg::Object(obj) => {
+                writeln!(f, " ┌──\n │ {} \n └──", obj)
+            }
+        }
+    }
+}
+
 #[serde_as]
 #[derive(Eq, PartialEq, Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -1762,6 +1774,25 @@ impl SuiPureValue {
 
     pub fn value_type(&self) -> Option<TypeTag> {
         self.value_type.clone()
+    }
+}
+
+impl Display for SuiPureValue {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        if let Some(type_) = self.value_type() {
+            write!(
+                f,
+                "Value Type: {}\n │ Value: {}",
+                type_,
+                self.value.to_json_value().to_string().as_str()
+            )
+        } else {
+            writeln!(
+                f,
+                "Value: {}",
+                self.value.to_json_value().to_string().as_str()
+            )
+        }
     }
 }
 
@@ -1797,6 +1828,41 @@ pub enum SuiObjectArg {
         version: SequenceNumber,
         digest: ObjectDigest,
     },
+}
+
+impl Display for SuiObjectArg {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            SuiObjectArg::ImmOrOwnedObject {
+                object_id,
+                version,
+                digest,
+            } => writeln!(
+                f,
+                "ObjectID: {}\nVersion: {}\nDigest: {}",
+                object_id, version, digest
+            ),
+            SuiObjectArg::SharedObject {
+                object_id,
+                initial_shared_version,
+                mutable,
+            } => writeln!(
+                f,
+                "ObjectID: {}\nInitial Shared Version: {}\nMutable: {}",
+                object_id, initial_shared_version, mutable
+            ),
+
+            SuiObjectArg::Receiving {
+                object_id,
+                version,
+                digest,
+            } => writeln!(
+                f,
+                "ObjectID: {}\nVersion: {}\nDigest: {}",
+                object_id, version, digest
+            ),
+        }
+    }
 }
 
 #[serde_as]
