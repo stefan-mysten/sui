@@ -8,7 +8,5 @@ new Move_Package-Test123
 > cat Move_Package-Test123/Move.toml
 
 new _P
-
 new P_!
-
 new 1P
