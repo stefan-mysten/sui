@@ -24,7 +24,7 @@ pub const MOVE_STDLIB_ADDR_VALUE: &str = "0x1";
 /// Create a new Move package with name `name` at `path`. If `path` is not provided the package
 /// will be created in the directory `name`.
 ///
-/// By default, this command allows a strict naming scheme based on this regex: [A-Za-z][A-Za-z0-9-_]*, and it will replace hyphens (-) with underscore (_) in the address field in the Move.toml file.
+/// By default, this command allows a strict naming scheme based on this regex: [A-Za-z][A-Za-z0-9-_]*.
 #[derive(Parser)]
 #[clap(name = "new")]
 pub struct New {
