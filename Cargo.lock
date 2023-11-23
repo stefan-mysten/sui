@@ -137,6 +137,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "allocator-api2"
+version = "0.2.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0942ffc6dcaadf03badf6e6a2d0228460359d5e34b57ccdc720b7382dfbd5ec5"
+
+[[package]]
 name = "android-tzdata"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4430,6 +4436,10 @@ name = "hashbrown"
 version = "0.14.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7dfda62a12f55daeae5015f81b0baea145391cb4520f86c248fc615d72640d12"
+dependencies = [
+ "ahash 0.8.2",
+ "allocator-api2",
+]
 
 [[package]]
 name = "hdrhistogram"
@@ -6601,7 +6611,7 @@ dependencies = [
  "ed25519-consensus",
  "fastcrypto",
  "fastcrypto-tbls",
- "hashbrown 0.12.3",
+ "hashbrown 0.14.1",
  "impl-trait-for-tuples",
  "indexmap 1.9.3",
  "mysten-util-mem-derive",
@@ -14317,6 +14327,7 @@ dependencies = [
  "aliasable",
  "alloc-no-stdlib",
  "alloc-stdlib",
+ "allocator-api2",
  "anemo",
  "anemo-build",
  "anemo-cli",
