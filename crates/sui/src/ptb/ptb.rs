@@ -8,10 +8,12 @@ use anyhow::anyhow;
 use clap::parser::ValuesRef;
 use clap::ArgMatches;
 use clap::CommandFactory;
+use clap::Id;
 use clap::Parser;
 use petgraph::prelude::DiGraphMap;
 use serde::Serialize;
 use shared_crypto::intent::Intent;
+use std::clone::Clone;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt::Display;
@@ -30,6 +32,10 @@ use tabled::{
     builder::Builder as TableBuilder,
     settings::{style::HorizontalLine, Panel as TablePanel, Style as TableStyle},
 };
+
+#[cfg(test)]
+#[path = "../unit_tests/ptb_tests.rs"]
+mod ptb_tests;
 
 /// The ProgrammableTransactionBlock structure used in the CLI ptb command
 #[derive(Parser, Debug, Default)]
@@ -82,6 +88,16 @@ pub struct PTB {
     pick_gas_budget: Option<PTBGas>,
 }
 
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct PTBCommand {
+    pub name: String,
+    pub values: Vec<String>,
+}
+
+pub struct PTBPreview {
+    cmds: Vec<PTBCommand>,
+}
+
 #[derive(clap::ValueEnum, Clone, Debug, Serialize, Default)]
 enum PTBGas {
     MIN,
@@ -89,30 +105,6 @@ enum PTBGas {
     MAX,
     SUM,
 }
-
-impl Display for PTBGas {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let r = match self {
-            PTBGas::MIN => "min",
-            PTBGas::MAX => "max",
-            PTBGas::SUM => "sum",
-        };
-        write!(f, "{}", r.to_string())
-    }
-}
-
-#[derive(Clone, PartialEq, Eq, Hash, Debug)]
-pub struct PTBCommand {
-    pub name: String,
-    pub values: Vec<String>,
-}
-
-// #[derive(Clone, PartialEq, Eq, Hash, Debug)]
-// pub enum Value {
-//     Bool(bool),
-//     String(String),
-//     Gas(PTBGas),
-// }
 
 impl PTB {
     /// Get the passed arguments for this PTB and construct
@@ -136,88 +128,18 @@ impl PTB {
                 continue;
             }
 
-            // handle PTBGas manually
-            // TODO can we do better? The issue is that we need the order (basically, indices_of)
-            // and the values can be either bool, String, or PTBGas
             if arg_name.as_str() == "pick_gas_budget" {
-                let values: ValuesRef<'_, PTBGas> = matches
-                    .get_many(arg_name.as_str())
-                    .ok_or_else(|| anyhow!("Cannot parse the args for the PTB"))?;
-
-                for (value, index) in values.zip(
-                    matches
-                        .indices_of(arg_name.as_str())
-                        .expect("id came from matches"),
-                ) {
-                    order.insert(
-                        index,
-                        PTBCommand {
-                            name: arg_name.to_string(),
-                            values: vec![value.to_string()],
-                        },
-                    );
-                }
+                insert_value::<PTBGas>(arg_name, &matches, &mut order)?;
                 continue;
             }
-            // handle bools manually
-            // TODO can we do better? The issue is that we need the order (basically, indices_of)
-            // and the values can be either bool, String, or PTBGas
             if arg_name.as_str() == "preview" || arg_name.as_str() == "warn_shadows" {
-                let values: ValuesRef<'_, bool> = matches
-                    .get_many(arg_name.as_str())
-                    .ok_or_else(|| anyhow!("Cannot parse the args for the PTB"))?;
-
-                for (value, index) in values.zip(
-                    matches
-                        .indices_of(arg_name.as_str())
-                        .expect("id came from matches"),
-                ) {
-                    order.insert(
-                        index,
-                        PTBCommand {
-                            name: arg_name.to_string(),
-                            values: vec![value.to_string()],
-                        },
-                    );
-                }
+                insert_value::<bool>(arg_name, &matches, &mut order)?;
             } else {
-                let values: ValuesRef<'_, String> = matches
-                    .get_many(arg_name.as_str())
-                    .ok_or_else(|| anyhow!("Cannot parse the args for the PTB"))?;
-
-                for (value, index) in values.zip(
-                    matches
-                        .indices_of(arg_name.as_str())
-                        .expect("id came from matches"),
-                ) {
-                    order.insert(
-                        index,
-                        PTBCommand {
-                            name: arg_name.to_string(),
-                            values: vec![value.to_string()],
-                        },
-                    );
-                }
+                insert_value::<String>(arg_name, &matches, &mut order)?;
             }
         }
         Ok(self.build_ptb_for_parsing(order, &parent_file, included_files)?)
     }
-
-    // fn insert_value<T>(&self, values: ValuesRef<'_, T>) {
-    //     for (value, index) in values.zip(
-    //         matches
-    //             .indices_of(arg_name.as_str())
-    //             .expect("id came from matches"),
-    //     ) {
-    //         order.insert(
-    //             index,
-    //             PTBCommand {
-    //                 name: arg_name.to_string(),
-    //                 values: vec![value],
-    //             },
-    //         );
-    //     }
-    // }
 
     /// Builds a sequential list of ptb commands that should be fed into the parser
     pub fn build_ptb_for_parsing(
@@ -307,7 +229,7 @@ impl PTB {
                 return Err(anyhow!("{filename} does not exist"));
             }
         }
-        let file_content = std::fs::read_to_string(file_path)?;
+        let file_content = std::fs::read_to_string(file_path)?.replace("\\", "");
 
         // do not allow for circular inclusion of files
         // e.g., sui client ptb --file a.ptb, and then have --file a.ptb in a.ptb file.
@@ -333,6 +255,8 @@ impl PTB {
             std::iter::repeat(k.as_str()).zip(vs)
         });
 
+        // find if there is a circular file inclusion
+        // we use toposort as it will return which file includes a file that was already included
         let graph: DiGraphMap<_, ()> = edges.collect();
         let sort = petgraph::algo::toposort(&graph, None);
         sort.map_err(|x| {
@@ -342,6 +266,7 @@ impl PTB {
             )
         })?;
 
+        // we also need to resolve $envs
         let lines = file_content
             .lines()
             .flat_map(|x| x.split_whitespace())
@@ -501,8 +426,31 @@ impl PTB {
     }
 }
 
-pub struct PTBPreview {
-    cmds: Vec<PTBCommand>,
+fn insert_value<T>(
+    arg_name: &Id,
+    matches: &ArgMatches,
+    order: &mut BTreeMap<usize, PTBCommand>,
+) -> Result<(), anyhow::Error>
+where
+    T: Clone + Display + Send + Sync + 'static,
+{
+    let values: ValuesRef<'_, T> = matches
+        .get_many(arg_name.as_str())
+        .ok_or_else(|| anyhow!("Cannot parse the args for the PTB"))?;
+    for (value, index) in values.zip(
+        matches
+            .indices_of(arg_name.as_str())
+            .expect("id came from matches"),
+    ) {
+        order.insert(
+            index,
+            PTBCommand {
+                name: arg_name.to_string(),
+                values: vec![value.to_string()],
+            },
+        );
+    }
+    Ok(())
 }
 
 impl Display for PTBPreview {
@@ -538,13 +486,15 @@ impl Display for PTBPreview {
 
         write!(f, "{}", table)
     }
-    // fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-    //     let cmd_name = &self.name;
-    //     let vals = &self.values.join(" ");
-    //     write!(
-    //         f,
-    //         " ┌──\n │ Command: {cmd_name}\n │ Value(s): {}\n └──\n",
-    //         vals
-    //     )
-    // }
+}
+
+impl Display for PTBGas {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let r = match self {
+            PTBGas::MIN => "min",
+            PTBGas::MAX => "max",
+            PTBGas::SUM => "sum",
+        };
+        write!(f, "{}", r.to_string())
+    }
 }
