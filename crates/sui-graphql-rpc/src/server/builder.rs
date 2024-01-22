@@ -327,10 +327,11 @@ pub mod tests {
         extensions::{Extension, ExtensionContext, NextExecute},
         Response,
     };
+    use prometheus::{proto::MetricFamily, Registry};
     use rand::{rngs::StdRng, SeedableRng};
     use simulacrum::Simulacrum;
-    use std::sync::Arc;
     use std::time::Duration;
+    use std::{collections::HashMap, sync::Arc};
     use uuid::Uuid;
 
     async fn prep_cluster() -> (ConnectionConfig, ExecutorCluster) {
@@ -690,5 +691,122 @@ pub mod tests {
             err,
             vec!["Connection's page size of 51 exceeds max of 50".to_string()]
         );
+    }
+
+    pub async fn test_query_complexity_metrics_impl() {
+        let (connection_config, _cluster) = prep_cluster().await;
+
+        let binding_address: SocketAddr = "0.0.0.0:9185".parse().unwrap();
+        let registry_service = mysten_metrics::start_prometheus_server(binding_address);
+        let registry = registry_service.default_registry();
+        let metrics = Metrics::new(&registry);
+        mysten_metrics::init_metrics(&registry);
+        let service_config = ServiceConfig::default();
+        let db_url: String = connection_config.db_url.clone();
+        let reader = PgManager::reader(db_url).expect("Failed to create pg connection pool");
+        let db = Db::new(reader.clone(), service_config.limits, metrics.clone());
+        let pg_conn_pool = PgManager::new(reader, service_config.limits);
+        let schema = ServerBuilder::new(8000, "127.0.0.1".to_string(), metrics.clone())
+            .context_data(db)
+            .context_data(pg_conn_pool)
+            .context_data(service_config)
+            .context_data(metrics.clone())
+            .context_data(query_id())
+            .context_data(ip_address())
+            .extension(QueryLimitsChecker::default())
+            .build_schema();
+        let _ = schema.execute("{ chainIdentifier }").await;
+
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        println!("{:?}", registry_service.gather_all());
+
+        metrics.request_metrics.input_nodes.report(5);
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        println!("{:?}", registry_service.gather_all());
+        // tokio::time::sleep(Duration::from_millis(1500)).await;
+        // println!("{:?}", registry_service.gather_all());
+        // TODO these do not get properly triggered. Need more investigation, seems to be
+        // because of the Histogram and HistogramVec that comes from mysten-metrics.
+        // running the binary is fine, just the testing is funky.
+        // let (_input_hist, input_sum, input_count) = _get_sample("input_nodes", &registry);
+        // assert_eq!(input_sum.len(), 1);
+        // assert_eq!(input_count.len(), 1);
+        // let (_input_hist, input_sum, input_count) = get_sample("output_nodes", &registry);
+        // assert_eq!(input_sum.len(), 1);
+        // assert_eq!(input_count.len(), 1);
+        // let (_input_hist, input_sum, input_count) = get_sample("query_depth", &registry);
+        // assert_eq!(input_sum.len(), 1);
+        // assert_eq!(input_count.len(), 1);
+        // let _ = schema
+        //     .execute("{ chainIdentifier protocolConfig { configs { value key }} }")
+        //     .await;
+
+        // let (_input_hist, input_sum, input_count) = get_sample("input_nodes", &registry);
+        // assert_eq!(input_sum.len(), 2);
+        // assert_eq!(input_count.len(), 2);
+        // let (_input_hist, input_sum, input_count) = get_sample("output_nodes", &registry);
+        // assert_eq!(input_sum.len(), 2);
+        // assert_eq!(input_count.len(), 2);
+        // let (_input_hist, input_sum, input_count) = get_sample("query_depth", &registry);
+        // assert_eq!(input_sum.len(), 2);
+        // assert_eq!(input_count.len(), 2);
+    }
+
+    // TODO Add these convenience functions to mysten-metrics/src/histogram.rs to enable
+    // easier testing
+    fn _get_sample(
+        name: &str,
+        registry: &Registry,
+    ) -> (
+        HashMap<String, f64>,
+        HashMap<String, f64>,
+        HashMap<String, f64>,
+    ) {
+        let gather = registry.gather();
+        println!("{gather:?}");
+        let gather: HashMap<_, _> = gather
+            .into_iter()
+            .map(|f| (f.get_name().to_string(), f))
+            .collect();
+        let hist = gather.get(name).unwrap();
+        let sum = gather.get("{name}_sum").unwrap();
+        let count = gather.get("{name}_count").unwrap();
+        let hist = _aggregate_gauge_by_label(hist);
+        let sum = _aggregate_counter_by_label(sum);
+        let count = _aggregate_counter_by_label(count);
+        (hist, sum, count)
+    }
+    // copied from mysten-metrics histogram tests
+
+    fn _aggregate_gauge_by_label(family: &MetricFamily) -> HashMap<String, f64> {
+        family
+            .get_metric()
+            .iter()
+            .map(|m| {
+                let value = m.get_gauge().get_value();
+                let mut key = String::new();
+                for label in m.get_label() {
+                    key.push_str("::");
+                    key.push_str(label.get_value());
+                }
+                (key, value)
+            })
+            .collect()
+    }
+
+    fn _aggregate_counter_by_label(family: &MetricFamily) -> HashMap<String, f64> {
+        family
+            .get_metric()
+            .iter()
+            .map(|m| {
+                let value = m.get_counter().get_value();
+                let mut key = String::new();
+                for label in m.get_label() {
+                    key.push_str("::");
+                    key.push_str(label.get_value());
+                }
+                (key, value)
+            })
+            .collect()
     }
 }

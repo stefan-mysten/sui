@@ -54,6 +54,7 @@ struct HistogramReporter {
 
 type HistogramLabels = Arc<HistogramLabelsInner>;
 
+#[derive(Debug)]
 struct HistogramLabelsInner {
     labels: Vec<String>,
     hash: u64,
@@ -184,9 +185,13 @@ impl Histogram {
     }
 
     pub fn report(&self, v: Point) {
+        println!("Histogram: Trying to report data {:?}", v);
         match self.channel.try_send((self.labels.clone(), v)) {
-            Ok(()) => {}
+            Ok(()) => {
+                println!("Succesfully reported data");
+            }
             Err(TrySendError::Closed(_)) => {
+                println!("Error when trying to report data");
                 // can happen during runtime shutdown
             }
             Err(TrySendError::Full(_)) => debug!("Histogram channel is full, dropping data"),
@@ -221,6 +226,7 @@ impl HistogramCollector {
         let mut labeled_data: HashMap<HistogramLabels, Vec<Point>> = HashMap::new();
         let mut count = 0usize;
         let mut timeout = tokio::time::sleep_until(deadline).boxed();
+        println!("labeled data {:?}", labeled_data);
         const MAX_POINTS: usize = 500_000;
         loop {
             tokio::select! {
@@ -259,6 +265,7 @@ impl HistogramCollector {
 
 impl HistogramReporter {
     pub fn report(&mut self, labeled_data: HashMap<HistogramLabels, Vec<Point>>) {
+        println!("Reporter: Trying to report data");
         let _scope = monitored_scope("HistogramReporter::report");
         let mut reset_labels = self.known_labels.clone();
         for (label, mut data) in labeled_data {
@@ -338,6 +345,22 @@ mod tests {
         assert_eq!(HistogramReporter::format_pct1000(999), "99.9");
         assert_eq!(HistogramReporter::format_pct1000(990), "99");
         assert_eq!(HistogramReporter::format_pct1000(900), "90");
+    }
+
+    #[tokio::test]
+    async fn histogram_test() {
+        let registry = Registry::new();
+        let histogram = Histogram::new_in_registry_with_percentiles("test", "xx", &registry);
+        histogram.report(1);
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        let gather = registry.gather();
+        let gather: HashMap<_, _> = gather
+            .into_iter()
+            .map(|f| (f.get_name().to_string(), f))
+            .collect();
+        let hist = gather.get("test").unwrap();
+        let sum = gather.get("test_sum").unwrap();
+        let count = gather.get("test_count").unwrap();
     }
 
     #[tokio::test]
