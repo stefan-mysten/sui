@@ -216,38 +216,31 @@ impl PTB {
         output: &mut BTreeMap<usize, PTBCommand>,
     ) -> Result<usize, anyhow::Error> {
         if filename.len() != 1 {
-            return Err(anyhow!("The --file options should only pass one filename"));
+            return Err(anyhow!("The --file options should only pass one filename."));
         }
+        // Check if file exists
         let filename = filename.get(0).unwrap();
         let file_path = std::path::Path::new(filename);
         if !file_path.exists() {
             if let Some(parent_file) = parent_file {
                 return Err(anyhow!(
-                    "{parent_file} includes {filename}, which does not exist"
+                    "File {filename} included by {parent_file} does not exist."
                 ));
             } else {
-                return Err(anyhow!("{filename} does not exist"));
+                return Err(anyhow!("File {filename} does not exist."));
             }
         }
+
         let file_content = std::fs::read_to_string(file_path)?.replace("\\", "");
-
-        // do not allow for circular inclusion of files
-        // e.g., sui client ptb --file a.ptb, and then have --file a.ptb in a.ptb file.
-        if file_content.contains(&format!("--file {filename}")) {
-            return Err(anyhow!(
-                "Cannot have circular file inclusions. It appears that {filename} self includes itself."
-            ));
-        }
-
-        let files_to_include = file_content
+        let files_to_resolve = file_content
             .lines()
             .filter(|x| x.starts_with("--file"))
             .map(|x| x.to_string().replace("--file", "").replace(" ", ""))
             .collect::<Vec<_>>();
         if let Some(files) = included_files.get_mut(&current_file) {
-            files.extend(files_to_include);
+            files.extend(files_to_resolve);
         } else {
-            included_files.insert(current_file, files_to_include);
+            included_files.insert(current_file, files_to_resolve);
         }
 
         let edges = included_files.iter().flat_map(|(k, vs)| {
@@ -274,11 +267,6 @@ impl PTB {
 
         // in a file the first arg will not be the binary's name, so exclude it
         let input = PTB::command().no_binary_name(true);
-        // .arg(Arg::new("--gas-budget").required(false));
-        // TODO do not require --gas-budget to exist in files???
-        // the issue is that we could pass a --gas-budget from the CLI and then a --file
-        // and in the file there is no --gas-budget. For now, --gas-budget is always required
-        // so we might want to figure out the best way to handle this case
         let args = input.get_matches_from(lines);
         let ptb_commands = self.from_matches(&args, Some(filename.to_string()), included_files)?;
         let len_cmds = ptb_commands.len();
