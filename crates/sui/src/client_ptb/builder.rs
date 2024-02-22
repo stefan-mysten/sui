@@ -1,6 +1,10 @@
 // Copyright (c) Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
+// TODO:
+// * [ ] Handle mut properly
+// * [ ] Handle other pure values properly (what are they?)
+
 use crate::{
     client_commands::{compile_package, upgrade_package},
     client_ptb::{
@@ -24,16 +28,14 @@ use move_command_line_common::{
 use move_core_types::{account_address::AccountAddress, ident_str};
 use move_package::BuildConfig;
 use serde::Serialize;
-use std::{
-    collections::{BTreeMap, HashSet},
-    path::PathBuf,
-};
+use std::{collections::BTreeMap, path::PathBuf};
 use sui_json::is_receiving_argument;
 use sui_json_rpc_types::{SuiObjectData, SuiObjectDataOptions, SuiRawData};
-use sui_protocol_config::ProtocolConfig;
+use sui_protocol_config::{Chain, ProtocolConfig};
 use sui_sdk::apis::ReadApi;
 use sui_types::{
     base_types::{ObjectID, TxContext, TxContextKind},
+    digests::{get_mainnet_chain_identifier, get_testnet_chain_identifier},
     move_package::MovePackage,
     object::Owner,
     programmable_transaction_builder::ProgrammableTransactionBuilder,
@@ -267,8 +269,6 @@ impl<'a> PTBBuilder<'a> {
                 }
 
                 for (i, command_loc) in commands.iter().enumerate() {
-                    // NB: We use the file scope of the command, and _not_ the current file
-                    // scope for these errors!
                     if i == 0 {
                         self.errors.push(PTBError {
                             message: format!("Variable '{}' first declared here", ident),
@@ -320,7 +320,7 @@ impl<'a> PTBBuilder<'a> {
     // Declaring and handling identifiers and variables
     // ===========================================================================
 
-    /// Declare and identifier. This is used to support shadowing warnings.
+    /// Declare an identifier. This is used to support shadowing warnings.
     fn declare_identifier(&mut self, ident: String, ident_loc: Span) {
         let e = self.identifiers.entry(ident).or_default();
         e.push(ident_loc);
@@ -331,7 +331,7 @@ impl<'a> PTBBuilder<'a> {
     fn declare_possible_address_binding(&mut self, ident: String, possible_addr: &Spanned<PTBArg>) {
         match possible_addr.value {
             PTBArg::Address(addr) => {
-                self.addresses.insert(ident.to_string(), addr.into_inner());
+                self.addresses.insert(ident, addr.into_inner());
             }
             PTBArg::Identifier(ref i) => {
                 // We do a one-hop resolution here to see if we can resolve the identifier to an
@@ -339,7 +339,7 @@ impl<'a> PTBBuilder<'a> {
                 // This will also handle direct aliasing of addresses throughout the ptb.
                 // Note that we don't do this recursively so no need to worry about loops/cycles.
                 if let Some(addr) = self.addresses.get(i) {
-                    self.addresses.insert(ident.to_string(), *addr);
+                    self.addresses.insert(ident, *addr);
                 }
             }
             // If we encounter a dotted string e.g., "foo.0" or "sui.io" or something like that
@@ -362,6 +362,26 @@ impl<'a> PTBBuilder<'a> {
         }
     }
 
+    async fn get_protocol_config(&self, loc: Span) -> PTBResult<ProtocolConfig> {
+        let config = self
+            .reader
+            .get_protocol_config(None)
+            .await
+            .map_err(|e| err!(loc, "{e}"))?;
+        let chain_id = self
+            .reader
+            .get_chain_identifier()
+            .await
+            .map_err(|e| err!(loc, "{e}"))?;
+        Ok(if chain_id == get_mainnet_chain_identifier().to_string() {
+            ProtocolConfig::get_for_version(config.protocol_version, Chain::Mainnet)
+        } else if chain_id == get_testnet_chain_identifier().to_string() {
+            ProtocolConfig::get_for_version(config.protocol_version, Chain::Testnet)
+        } else {
+            ProtocolConfig::get_for_version(config.protocol_version, Chain::Unknown)
+        })
+    }
+
     /// Resolve an object ID to a Move package.
     async fn resolve_to_package(
         &mut self,
@@ -381,11 +401,12 @@ impl<'a> PTBBuilder<'a> {
                 "BCS field in object '{}' is missing or not a package.", package_id
             );
         };
+        let protocol_config = self.get_protocol_config(loc).await?;
         let package: MovePackage = MovePackage::new(
             package.id,
             object.version,
             package.module_map,
-            ProtocolConfig::get_for_min_version().max_move_package_size(),
+            protocol_config.max_move_package_size(),
             package.type_origin_table,
             package.linkage_table,
         )
@@ -612,7 +633,7 @@ impl<'a> PTBBuilder<'a> {
                 Ok(self.resolved_arguments[&i])
             }
             // Lastly -- look to see if this is an address that has been either declared in scope,
-            // or that is coming from an external soruce (e.g., the keystore).
+            // or that is coming from an external source (e.g., the keystore).
             PTBArg::Identifier(i) if self.addresses.contains_key(&i) => {
                 // We now have a location for this address (which may have come from the keystore
                 // so we didnt' have an address for it before), so we tag it with its first usage
@@ -627,8 +648,14 @@ impl<'a> PTBBuilder<'a> {
                 );
                 self.resolve(arg_loc.wrap(PTBArg::Identifier(i)), ctx).await
             }
-            x @ PTBArg::Option(_) => ctx.pure(self, arg_loc, x.to_move_value_opt(arg_loc)?).await,
-            x @ PTBArg::Vector(_) => ctx.pure(self, arg_loc, x.to_move_value_opt(arg_loc)?).await,
+            x @ PTBArg::Option(_) => {
+                ctx.pure(self, arg_loc, x.to_pure_move_value(arg_loc)?)
+                    .await
+            }
+            x @ PTBArg::Vector(_) => {
+                ctx.pure(self, arg_loc, x.to_pure_move_value(arg_loc)?)
+                    .await
+            }
             PTBArg::Address(addr) => {
                 let object_id = ObjectID::from_address(addr.into_inner());
                 ctx.resolve_object_id(self, arg_loc, object_id).await
@@ -665,12 +692,8 @@ impl<'a> PTBBuilder<'a> {
                         // handle a alias that looks something like `foo.0`
                         None => {
                             let formatted_access = format!("{}.{}", head.value, access);
-                            if !self
-                                .addresses
-                                .keys()
-                                .chain(self.identifiers.keys())
-                                .collect::<HashSet<_>>()
-                                .contains(&formatted_access)
+                            if !self.addresses.contains_key(&formatted_access)
+                                && !self.identifiers.contains_key(&formatted_access)
                             {
                                 match self.did_you_mean_identifier(&head.value) {
                                     Some(similars) => {

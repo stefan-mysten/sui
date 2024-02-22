@@ -134,7 +134,7 @@ pub enum Argument {
 impl Argument {
     /// Resolve an `Argument` into a `MoveValue` if possible. Errors if the `Argument` is not
     /// convertible to a `MoveValue`.
-    pub fn to_move_value_opt(&self, loc: Span) -> PTBResult<MoveValue> {
+    pub fn to_pure_move_value(&self, loc: Span) -> PTBResult<MoveValue> {
         Ok(match self {
             Argument::Bool(b) => MoveValue::Bool(*b),
             Argument::U8(u) => MoveValue::U8(*u),
@@ -146,7 +146,7 @@ impl Argument {
             Argument::Address(a) => MoveValue::Address(a.into_inner()),
             Argument::Vector(vs) => MoveValue::Vector(
                 vs.iter()
-                    .map(|sp!(loc, v)| v.to_move_value_opt(*loc))
+                    .map(|sp!(loc, v)| v.to_pure_move_value(*loc))
                     .collect::<PTBResult<Vec<_>>>()
                     .map_err(|e| e.with_help(
                             format!("Was unable to parse '{self}' as a pure PTB value. This is most likely because \
@@ -159,7 +159,7 @@ impl Argument {
             }
             Argument::Option(sp!(loc, o)) => {
                 if let Some(v) = o {
-                    let v = v.as_ref().to_move_value_opt(*loc).map_err(|e| e.with_help(
+                    let v = v.as_ref().to_pure_move_value(*loc).map_err(|e| e.with_help(
                             format!(
                                 "Was unable to parse '{self}' as a pure PTB value. This is most likely because \
                                 the option contains a non-primitive (e.g., object or array) \
@@ -181,15 +181,15 @@ impl Argument {
 impl fmt::Display for Argument {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Argument::Bool(b) => write!(f, "{}", b),
-            Argument::U8(u) => write!(f, "{}u8", u),
-            Argument::U16(u) => write!(f, "{}u16", u),
-            Argument::U32(u) => write!(f, "{}u32", u),
-            Argument::U64(u) => write!(f, "{}u64", u),
-            Argument::U128(u) => write!(f, "{}u128", u),
-            Argument::U256(u) => write!(f, "{}u256", u),
+            Argument::Bool(b) => write!(f, "{b}"),
+            Argument::U8(u) => write!(f, "{u}u8"),
+            Argument::U16(u) => write!(f, "{u}u16"),
+            Argument::U32(u) => write!(f, "{u}u32"),
+            Argument::U64(u) => write!(f, "{u}u64"),
+            Argument::U128(u) => write!(f, "{u}u128"),
+            Argument::U256(u) => write!(f, "{u}u256"),
             Argument::Gas => write!(f, "gas"),
-            Argument::Identifier(i) => write!(f, "{}", i),
+            Argument::Identifier(i) => write!(f, "{i}"),
             Argument::VariableAccess(sp!(_, head), accesses) => {
                 write!(f, "{}", head)?;
                 for sp!(_, access) in accesses {
@@ -197,59 +197,57 @@ impl fmt::Display for Argument {
                 }
                 Ok(())
             }
-            Argument::Address(a) => write!(f, "@{}", a),
-            Argument::String(s) => write!(f, "\"{}\"", s),
+            Argument::Address(a) => write!(f, "@{a}"),
+            Argument::String(s) => write!(f, "{s:?}"),
             Argument::Vector(v) => {
                 write!(f, "vector[")?;
-                for (i, sp!(_, arg)) in v.iter().enumerate() {
-                    write!(f, "{}", arg)?;
-                    if i != v.len() - 1 {
-                        write!(f, ", ")?;
-                    }
+                let mut prefix = "";
+                for sp!(_, arg) in v.iter() {
+                    write!(f, "{prefix}")?;
+                    write!(f, "{arg}")?;
+                    prefix = ", ";
                 }
                 write!(f, "]")
             }
             Argument::Option(sp!(_, o)) => match o {
-                Some(v) => write!(f, "some({})", v),
+                Some(v) => write!(f, "some({v})"),
                 None => write!(f, "none"),
             },
         }
     }
 }
 
+fn delimited_list<T: fmt::Display>(
+    f: &mut std::fmt::Formatter<'_>,
+    sep: &str,
+    items: impl IntoIterator<Item = T>,
+) -> std::fmt::Result {
+    let mut prefix = "";
+    for item in items {
+        write!(f, "{}{}", prefix, item)?;
+        prefix = sep;
+    }
+    Ok(())
+}
+
 impl fmt::Display for ParsedPTBCommand {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ParsedPTBCommand::TransferObjects(arg, args) => write!(
-                f,
-                "{TRANSFER_OBJECTS} {} [{}]",
-                arg.value,
-                args.value
-                    .iter()
-                    .map(|x| x.value.to_string())
-                    .collect::<Vec<String>>()
-                    .join(", ")
-            ),
-            ParsedPTBCommand::SplitCoins(arg, args) => write!(
-                f,
-                "{SPLIT_COINS} {} [{}]",
-                arg.value,
-                args.value
-                    .iter()
-                    .map(|x| x.value.to_string())
-                    .collect::<Vec<String>>()
-                    .join(", ")
-            ),
-            ParsedPTBCommand::MergeCoins(arg, args) => write!(
-                f,
-                "{MERGE_COINS} {} [{}]",
-                arg.value,
-                args.value
-                    .iter()
-                    .map(|x| x.value.to_string())
-                    .collect::<Vec<String>>()
-                    .join(", ")
-            ),
+            ParsedPTBCommand::TransferObjects(arg, args) => {
+                write!(f, "{TRANSFER_OBJECTS} {} [", arg.value)?;
+                delimited_list(f, ", ", args.value.iter().map(|x| &x.value))?;
+                write!(f, "]")
+            }
+            ParsedPTBCommand::SplitCoins(arg, args) => {
+                write!(f, "{SPLIT_COINS} {} [", arg.value)?;
+                delimited_list(f, ", ", args.value.iter().map(|x| &x.value))?;
+                write!(f, "]")
+            }
+            ParsedPTBCommand::MergeCoins(arg, args) => {
+                write!(f, "{MERGE_COINS} {} [", arg.value)?;
+                delimited_list(f, ", ", args.value.iter().map(|x| &x.value))?;
+                write!(f, "]")
+            }
             ParsedPTBCommand::Assign(arg, arg_opt) => write!(
                 f,
                 "{ASSIGN} {}{}",
@@ -264,16 +262,13 @@ impl fmt::Display for ParsedPTBCommand {
             ParsedPTBCommand::Upgrade(s, a) => write!(f, "{UPGRADE} {} {}", s.value, a.value),
             ParsedPTBCommand::WarnShadows => write!(f, "{WARN_SHADOWS}"),
             ParsedPTBCommand::Preview => write!(f, "{PREVIEW}"),
-            ParsedPTBCommand::MakeMoveVec(ty, args) => write!(
-                f,
-                "{MAKE_MOVE_VEC} {} [{}]",
-                TyDisplay(&ty.value),
-                args.value
-                    .iter()
-                    .map(|x| x.value.to_string())
-                    .collect::<Vec<String>>()
-                    .join(", ")
-            ),
+            ParsedPTBCommand::MakeMoveVec(ty, args) => {
+                write!(f, "{MAKE_MOVE_VEC} <",)?;
+                write!(f, "{}", TyDisplay(&ty.value))?;
+                write!(f, "> [")?;
+                delimited_list(f, ", ", args.value.iter().map(|x| &x.value))?;
+                write!(f, "]")
+            }
             ParsedPTBCommand::MoveCall(
                 sp!(
                     _,
@@ -290,29 +285,26 @@ impl fmt::Display for ParsedPTBCommand {
                     ParsedAddress::Named(n) => n.to_string(),
                     ParsedAddress::Numerical(n) => n.to_string(),
                 };
-                let type_args = match tys {
-                    Some(tys) => format!(
-                        "<{}>",
-                        tys.value
-                            .iter()
-                            .map(|x| TyDisplay(x).to_string())
-                            .collect::<Vec<String>>()
-                            .join(", ")
-                    ),
-                    None => "".to_string(),
+                let type_args = |f: &mut std::fmt::Formatter| match tys {
+                    Some(tys) => {
+                        write!(f, "<")?;
+                        delimited_list(f, ", ", tys.value.iter().map(TyDisplay))?;
+                        write!(f, ">")
+                    }
+                    None => Ok(()),
                 };
                 write!(
                     f,
-                    "{MOVE_CALL} {}::{}::{}{} {}",
-                    address,
-                    module_name.value,
-                    function_name.value,
-                    type_args,
-                    args.iter()
-                        .map(|x| x.value.to_string())
-                        .collect::<Vec<String>>()
-                        .join(" ")
-                )
+                    "{MOVE_CALL} {address}::{}::{}",
+                    module_name.value, function_name.value
+                )?;
+                type_args(f)?;
+
+                if !args.is_empty() {
+                    write!(f, " ")?;
+                }
+
+                delimited_list(f, " ", args.iter().map(|x| x.value.to_string()))
             }
         }
     }
@@ -326,9 +318,13 @@ impl<'a> fmt::Display for TyDisplay<'a> {
         match self.0 {
             Address => write!(f, "address"),
             U8 => write!(f, "u8"),
+            U16 => write!(f, "u16"),
+            U32 => write!(f, "u32"),
             U64 => write!(f, "u64"),
             U128 => write!(f, "u128"),
+            U256 => write!(f, "u256"),
             Bool => write!(f, "bool"),
+            Signer => write!(f, "signer"),
             Vector(ty) => write!(f, "vector<{}>", TyDisplay(ty)),
             Struct(ParsedStructType {
                 fq_name:
@@ -342,24 +338,16 @@ impl<'a> fmt::Display for TyDisplay<'a> {
                     ParsedAddress::Named(n) => n.to_string(),
                     ParsedAddress::Numerical(n) => n.to_string(),
                 };
-                let ty_str = if type_args.is_empty() {
-                    "".to_string()
+
+                write!(f, "{address}::{name}::{struct_name}")?;
+                if type_args.is_empty() {
+                    Ok(())
                 } else {
-                    format!(
-                        "<{}>",
-                        type_args
-                            .iter()
-                            .map(|x| TyDisplay(x).to_string())
-                            .collect::<Vec<String>>()
-                            .join(", ")
-                    )
-                };
-                write!(f, "{}::{}::{}{}", address, name, struct_name, ty_str)
+                    write!(f, "<")?;
+                    delimited_list(f, ", ", type_args.iter().map(TyDisplay))?;
+                    write!(f, ">")
+                }
             }
-            U16 => write!(f, "u16"),
-            U32 => write!(f, "u32"),
-            U256 => write!(f, "u256"),
-            Signer => write!(f, "signer"),
         }
     }
 }

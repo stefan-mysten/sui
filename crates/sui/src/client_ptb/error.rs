@@ -93,7 +93,7 @@ impl PTBError {
 
 impl Span {
     /// Wrap a value with a span.
-    pub fn wrap<T: Clone>(self, value: T) -> Spanned<T> {
+    pub fn wrap<T>(self, value: T) -> Spanned<T> {
         Spanned { span: self, value }
     }
 
@@ -106,10 +106,12 @@ impl Span {
         }
     }
 
+    /// Widen the span to include another if it is Some, otherwise return the original span.
     pub fn widen_opt(self, other: Option<Span>) -> Span {
         other.map_or(self, |other| self.widen(other))
     }
 
+    /// Create a span that points to the end of the file/string contents.
     pub fn eof_span() -> Span {
         Self {
             start: usize::MAX,

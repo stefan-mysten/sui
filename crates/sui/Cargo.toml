@@ -39,7 +39,6 @@ thiserror.workspace = true
 miette.workspace = true
 datatest-stable.workspace = true
 insta.workspace = true
-linked-hash-map.workspace = true
 shlex.workspace = true
 
 sui-config.workspace = true
@@ -60,7 +59,6 @@ shared-crypto.workspace = true
 sui-replay.workspace = true
 sui-transaction-builder.workspace = true
 move-binary-format.workspace = true
-move-symbol-pool.workspace = true
 
 fastcrypto.workspace = true
 fastcrypto-zkp.workspace = true
@@ -80,7 +78,6 @@ csv.workspace = true
 workspace-hack.workspace = true
 move-vm-profiler.workspace = true
 move-command-line-common.workspace = true
-petgraph.workspace = true
 
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 jemalloc-ctl.workspace = true
