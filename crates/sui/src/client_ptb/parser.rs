@@ -283,19 +283,6 @@ impl<'a, I: Iterator<Item = &'a str>> ProgramParser<'a, I> {
         let ident = sp.wrap(contents.to_owned());
 
         Ok(if self.peek().value.is_command_end() {
-            if let Some(last_cmd) = self.state.parsed.last() {
-                match last_cmd.value {
-                    ParsedPTBCommand::Assign(_, _)
-                    | ParsedPTBCommand::Preview
-                    | ParsedPTBCommand::WarnShadows => error!(sp => help: {
-                            "Assign can only be used after a command that produces a result \
-                            (e.g., split-coins, make-move-vec, move-call, etc.), \
-                            or when both a variable name and a value is passed."
-                        }, "Assign not allowed due to the previous command not producing any output."
-                    ),
-                    _ => (),
-                }
-            }
             ident.span.wrap(ParsedPTBCommand::Assign(ident, None))
         } else {
             let value = self.parse_argument()?;

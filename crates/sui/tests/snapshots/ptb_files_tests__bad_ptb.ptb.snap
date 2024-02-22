@@ -30,18 +30,6 @@ expression: "results.join(\"\\n\")"
    ╰────
 
   × Error when processing PTB
-   ╭─[5:10]
- 4 │ --assign X
- 5 │ --assign Y
-   ·          ┬
-   ·          ╰── Assign not allowed due to the previous command not producing any output.
- 6 │ --make-move-vec <vector<address>> [[@0x1],[@0x2]]
-   ╰────
-  help: Assign can only be used after a command that produces a result
-        (e.g., split-coins, make-move-vec, move-call, etc.), or when both a
-        variable name and a value is passed.
-
-  × Error when processing PTB
    ╭─[6:36]
  5 │ --assign Y
  6 │ --make-move-vec <vector<address>> [[@0x1],[@0x2]]
