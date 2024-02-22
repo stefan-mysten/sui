@@ -359,15 +359,9 @@ impl<'a, I: Iterator<Item = &'a str>> ProgramParser<'a, I> {
     /// Parse a gas specifier.
     /// The expected format is: `--gas-coin <address>`
     fn parse_gas_specifier(&mut self) -> PTBResult<Spanned<ObjectID>> {
-        self.expect(Token::At).map_err(|e| {
-            err!(e.span => help: {
-                "Addresses or object IDs require the character '@' in front"
-            }, "Expected an address")
-        })?;
-        Ok(match self.parse_address()? {
-            sp!(sp, ParsedAddress::Numerical(a)) => sp.wrap(ObjectID::from(a.into_inner())),
-            sp!(sp, _) => error!(sp, "Expected an address"),
-        })
+        Ok(self
+            .parse_address_literal()?
+            .map(|a| ObjectID::from(a.into_inner())))
     }
 }
 
@@ -407,16 +401,7 @@ impl<'a, I: Iterator<Item = &'a str>> ProgramParser<'a, I> {
                 self.parse_number(sp.wrap(&number))?
             }
 
-            L(T::At, _) => {
-                self.bump();
-                match self.parse_address()?.widen_span(sp) {
-                    sp!(sp, ParsedAddress::Numerical(n)) => sp.wrap(V::Address(n)),
-                    sp!(sp, ParsedAddress::Named(n)) => error!(
-                        sp,
-                        "Expected a numerical address but got a named address '{n}'",
-                    ),
-                }
-            }
+            L(T::At, _) => self.parse_address_literal()?.map(V::Address),
 
             L(T::Ident, A::NONE) => {
                 self.bump();
@@ -680,6 +665,23 @@ impl<'a, I: Iterator<Item = &'a str>> ProgramParser<'a, I> {
         };
 
         Ok(sp.wrap(addr))
+    }
+
+    /// Parse a numeric addres literal (must be prefixed by an `@` symbol).
+    fn parse_address_literal(&mut self) -> PTBResult<Spanned<NumericalAddress>> {
+        let sp!(sp, _) = self.expect(Token::At).map_err(|e| {
+            err!(e.span => help: {
+                "Addresses or object IDs require the character '@' in front"
+            }, "Expected an address")
+        })?;
+
+        Ok(match self.parse_address()?.widen_span(sp) {
+            sp!(sp, ParsedAddress::Numerical(n)) => sp.wrap(n),
+            sp!(sp, ParsedAddress::Named(n)) => error!(
+                sp,
+                "Expected a numerical address but got a named address '{n}'",
+            ),
+        })
     }
 
     // Parse an array of arguments. Each element of the array is separated by a comma.

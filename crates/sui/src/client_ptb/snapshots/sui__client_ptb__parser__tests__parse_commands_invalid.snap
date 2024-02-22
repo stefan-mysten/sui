@@ -646,7 +646,9 @@ expression: parsed
                 start: 11,
                 end: 15,
             },
-            help: None,
+            help: Some(
+                "Addresses or object IDs require the character '@' in front",
+            ),
         },
         PTBError {
             message: "Gas budget not set.",
@@ -661,13 +663,13 @@ expression: parsed
     ],
     [
         PTBError {
-            message: "Unexpected end of input",
+            message: "Expected an address",
             span: Span {
                 start: 10,
                 end: 10,
             },
             help: Some(
-                "Expected an argument here",
+                "Addresses or object IDs require the character '@' in front",
             ),
         },
         PTBError {
@@ -710,7 +712,9 @@ expression: parsed
                 start: 11,
                 end: 12,
             },
-            help: None,
+            help: Some(
+                "Addresses or object IDs require the character '@' in front",
+            ),
         },
         PTBError {
             message: "Gas budget not set.",
