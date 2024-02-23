@@ -1505,13 +1505,12 @@ impl SuiClientCommands {
                 SuiClientCommandResult::VerifySource
             }
             SuiClientCommands::PTB(ptb) => {
-                let args = ptb.clone().args;
-                if args.contains(&"--help".to_string()) {
+                if ptb.args.contains(&"--help".to_string()) {
                     ptb_description().print_long_help().unwrap();
-                } else if args.contains(&"-h".to_string()) || args.is_empty() {
+                } else if ptb.args.contains(&"-h".to_string()) || ptb.args.is_empty() {
                     ptb_description().print_help().unwrap();
                 } else {
-                    ptb.execute(args, context).await?;
+                    ptb.execute(context).await?;
                 }
                 SuiClientCommandResult::NoOutput
             }

@@ -49,29 +49,26 @@ pub struct Summary {
 
 impl PTB {
     /// Parses and executes the PTB with the sender as the current active address
-    pub async fn execute(
-        self,
-        args: Vec<String>,
-        context: &mut WalletContext,
-    ) -> Result<(), Error> {
-        let source_string = to_source_string(args.clone());
+    pub async fn execute(self, context: &mut WalletContext) -> Result<(), Error> {
+        let source_string = to_source_string(self.args.clone());
 
-        let (program, program_metadata) =
-            match crate::client_ptb::parser::ProgramParser::new(args.iter().map(|s| s.as_str()))
-                .map_err(|e| vec![e])
-                .and_then(|parser| parser.parse())
-            {
-                Err(errors) => {
-                    let suffix = if errors.len() > 1 { "s" } else { "" };
-                    let rendered = build_error_reports(&source_string, errors);
-                    eprintln!("Encountered error{suffix} when parsing PTB:");
-                    for e in rendered.iter() {
-                        eprintln!("{:?}", e);
-                    }
-                    anyhow::bail!("Could not build PTB due to previous error{suffix}");
+        let (program, program_metadata) = match crate::client_ptb::parser::ProgramParser::new(
+            self.args.iter().map(|s| s.as_str()),
+        )
+        .map_err(|e| vec![e])
+        .and_then(|parser| parser.parse())
+        {
+            Err(errors) => {
+                let suffix = if errors.len() > 1 { "s" } else { "" };
+                let rendered = build_error_reports(&source_string, errors);
+                eprintln!("Encountered error{suffix} when parsing PTB:");
+                for e in rendered.iter() {
+                    eprintln!("{:?}", e);
                 }
-                Ok(parsed) => parsed,
-            };
+                anyhow::bail!("Could not build PTB due to previous error{suffix}");
+            }
+            Ok(parsed) => parsed,
+        };
 
         if program_metadata.preview_set {
             println!(

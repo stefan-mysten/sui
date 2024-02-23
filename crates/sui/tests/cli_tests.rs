@@ -292,7 +292,7 @@ async fn test_ptb_publish_and_complex_arg_resolution() -> Result<(), anyhow::Err
 
     let args = shlex::split(&complex_ptb_string).unwrap();
     sui::client_ptb::ptb::PTB { args: args.clone() }
-        .execute(args, context)
+        .execute(context)
         .await?;
 
     Ok(())
