@@ -26,7 +26,7 @@ use sui_types::{
     transaction::{ProgrammableTransaction, Transaction, TransactionData},
 };
 
-use super::{ast::ProgramMetadata, parser::ProgramParser, utils::to_source_string};
+use super::{ast::ProgramMetadata, parser::ProgramParser};
 
 #[derive(Clone, Debug, Args)]
 #[clap(disable_help_flag = true)]
@@ -209,6 +209,32 @@ impl PTB {
             .map_err(|e| vec![e])
             .and_then(|parser| parser.parse())
     }
+}
+
+/// Convert a vector of shell tokens into a single string, with each shell token separated by a
+/// space with each command starting on a new line.
+/// NB: we add a space to the end of the source string to ensure that for unexpected EOF
+/// errors we have a location to point to.
+pub fn to_source_string(strings: Vec<String>) -> String {
+    let mut strings = strings.into_iter();
+    let mut string = String::new();
+
+    let Some(first) = strings.next() else {
+        return string;
+    };
+    string.push_str(&first);
+
+    for s in strings {
+        if s.starts_with("--") {
+            string.push('\n');
+            string.push_str(&s);
+        } else {
+            string.push(' ');
+            string.push_str(&s);
+        }
+    }
+    string.push(' ');
+    string
 }
 
 pub fn ptb_description() -> clap::Command {

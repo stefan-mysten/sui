@@ -9,4 +9,3 @@ pub mod lexer;
 pub mod parser;
 pub mod ptb;
 pub mod token;
-pub mod utils;
