@@ -148,32 +148,28 @@ impl Argument {
                 vs.iter()
                     .map(|sp!(loc, v)| v.to_pure_move_value(*loc))
                     .collect::<PTBResult<Vec<_>>>()
-                    .map_err(|e| e.with_help(
-                            format!("Was unable to parse '{self}' as a pure PTB value. This is most likely because \
-                                    the vector contains non-primitive (e.g., object or array) \
-                                    values which aren't permitted inside vectors")
-                            ))?
+                    .map_err(|e| {
+                        e.with_help("Literal vectors cannot contain object values.".to_string())
+                    })?,
             ),
             Argument::String(s) => {
                 MoveValue::Vector(s.bytes().map(MoveValue::U8).collect::<Vec<_>>())
             }
             Argument::Option(sp!(loc, o)) => {
                 if let Some(v) = o {
-                    let v = v.as_ref().to_pure_move_value(*loc).map_err(|e| e.with_help(
-                            format!(
-                                "Was unable to parse '{self}' as a pure PTB value. This is most likely because \
-                                the option contains a non-primitive (e.g., object or array) \
-                                value which isn't permitted inside an option"
-                                )
-                            ))?;
+                    let v = v.as_ref().to_pure_move_value(*loc).map_err(|e| {
+                        e.with_help(
+                            "Literal option values cannot contain object values.".to_string(),
+                        )
+                    })?;
                     MoveValue::Vector(vec![v])
                 } else {
                     MoveValue::Vector(vec![])
                 }
             }
-            Argument::Identifier(_)
-            | Argument::VariableAccess(_, _)
-            | Argument::Gas => error!(loc, "Was unable to convert '{self}' to primitive value (i.e., non-object value)"),
+            Argument::Identifier(_) | Argument::VariableAccess(_, _) | Argument::Gas => {
+                error!(loc, "Unable to convert '{self}' to non-object value.")
+            }
         })
     }
 }
@@ -281,10 +277,6 @@ impl fmt::Display for ParsedPTBCommand {
                 tys,
                 args,
             ) => {
-                let address = match &address.value {
-                    ParsedAddress::Named(n) => n.to_string(),
-                    ParsedAddress::Numerical(n) => n.to_string(),
-                };
                 let type_args = |f: &mut std::fmt::Formatter| match tys {
                     Some(tys) => {
                         write!(f, "<")?;
@@ -295,8 +287,8 @@ impl fmt::Display for ParsedPTBCommand {
                 };
                 write!(
                     f,
-                    "{MOVE_CALL} {address}::{}::{}",
-                    module_name.value, function_name.value
+                    "{MOVE_CALL} {}::{}::{}",
+                    address.value, module_name.value, function_name.value
                 )?;
                 type_args(f)?;
 
@@ -334,11 +326,6 @@ impl<'a> fmt::Display for TyDisplay<'a> {
                     },
                 type_args,
             }) => {
-                let address = match address {
-                    ParsedAddress::Named(n) => n.to_string(),
-                    ParsedAddress::Numerical(n) => n.to_string(),
-                };
-
                 write!(f, "{address}::{name}::{struct_name}")?;
                 if type_args.is_empty() {
                     Ok(())

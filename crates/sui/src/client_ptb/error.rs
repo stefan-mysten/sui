@@ -1,7 +1,7 @@
 // Copyright (c) Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-use miette::{miette, LabeledSpan};
+use miette::{miette, LabeledSpan, Severity};
 use std::fmt;
 use thiserror::Error;
 
@@ -27,6 +27,7 @@ pub struct PTBError {
     pub message: String,
     pub span: Span,
     pub help: Option<String>,
+    pub severity: Severity,
 }
 
 #[macro_export]
@@ -62,6 +63,7 @@ macro_rules! err {
             message: format!($($arg)*),
             span: $l,
             help: None,
+            severity: miette::Severity::Error,
         }
     };
     ($l:expr => help: { $($h:expr),* }, $($arg:tt)*) => {
@@ -69,6 +71,7 @@ macro_rules! err {
             message: format!($($arg)*),
             span: $l,
             help: Some(format!($($h),*)),
+            severity: miette::Severity::Error,
         }
     };
 }
@@ -82,11 +85,13 @@ impl PTBError {
             message,
             span,
             help: _,
+            severity,
         } = self;
         PTBError {
             message,
             span,
             help: Some(help),
+            severity,
         }
     }
 }
@@ -170,13 +175,23 @@ fn build_error_report(file_string: &str, error: PTBError) -> miette::Report {
         span,
         message,
         help,
+        severity,
     } = error;
     let clamp = |x: usize| x.min(file_string.len() - 1);
     let label = LabeledSpan::at(clamp(span.start)..clamp(span.end), message.clone());
-    let error_string = "Error when processing PTB".to_string();
+    let error_string = match severity {
+        Severity::Advice => "Advice found when processing PTB".to_string(),
+        Severity::Warning => "Warning when processing PTB".to_string(),
+        Severity::Error => "Error when processing PTB".to_string(),
+    };
     match help {
         Some(help_msg) => miette!(labels = vec![label], help = help_msg, "{}", error_string),
-        None => miette!(labels = vec![label], "{}", error_string),
+        None => miette!(
+            labels = vec![label],
+            severity = severity,
+            "{}",
+            error_string
+        ),
     }
     .with_source_code(file_string.to_string())
 }

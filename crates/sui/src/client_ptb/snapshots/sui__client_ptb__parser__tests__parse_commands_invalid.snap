@@ -13,6 +13,7 @@ expression: parsed
             help: Some(
                 "Expected to find a command here",
             ),
+            severity: Error,
         },
         PTBError {
             message: "Gas budget not set.",
@@ -23,6 +24,7 @@ expression: parsed
             help: Some(
                 "Use --gas-budget <u64> to set a gas budget",
             ),
+            severity: Error,
         },
     ],
     [
@@ -35,6 +37,7 @@ expression: parsed
             help: Some(
                 "Expected to find a command here",
             ),
+            severity: Error,
         },
         PTBError {
             message: "Gas budget not set.",
@@ -45,6 +48,7 @@ expression: parsed
             help: Some(
                 "Use --gas-budget <u64> to set a gas budget",
             ),
+            severity: Error,
         },
     ],
     [
@@ -57,6 +61,7 @@ expression: parsed
             help: Some(
                 "Expected an argument here",
             ),
+            severity: Error,
         },
         PTBError {
             message: "Gas budget not set.",
@@ -67,6 +72,7 @@ expression: parsed
             help: Some(
                 "Use --gas-budget <u64> to set a gas budget",
             ),
+            severity: Error,
         },
     ],
     [
@@ -77,6 +83,7 @@ expression: parsed
                 end: 20,
             },
             help: None,
+            severity: Error,
         },
         PTBError {
             message: "Gas budget not set.",
@@ -87,6 +94,7 @@ expression: parsed
             help: Some(
                 "Use --gas-budget <u64> to set a gas budget",
             ),
+            severity: Error,
         },
     ],
     [
@@ -99,6 +107,7 @@ expression: parsed
             help: Some(
                 "Expected an argument here",
             ),
+            severity: Error,
         },
         PTBError {
             message: "Gas budget not set.",
@@ -109,6 +118,7 @@ expression: parsed
             help: Some(
                 "Use --gas-budget <u64> to set a gas budget",
             ),
+            severity: Error,
         },
     ],
     [
@@ -121,6 +131,7 @@ expression: parsed
             help: Some(
                 "Expected an argument here",
             ),
+            severity: Error,
         },
         PTBError {
             message: "Gas budget not set.",
@@ -131,6 +142,7 @@ expression: parsed
             help: Some(
                 "Use --gas-budget <u64> to set a gas budget",
             ),
+            severity: Error,
         },
     ],
     [
@@ -141,6 +153,7 @@ expression: parsed
                 end: 15,
             },
             help: None,
+            severity: Error,
         },
         PTBError {
             message: "Gas budget not set.",
@@ -151,6 +164,7 @@ expression: parsed
             help: Some(
                 "Use --gas-budget <u64> to set a gas budget",
             ),
+            severity: Error,
         },
     ],
     [
@@ -163,6 +177,7 @@ expression: parsed
             help: Some(
                 "Expected an argument here",
             ),
+            severity: Error,
         },
         PTBError {
             message: "Gas budget not set.",
@@ -173,6 +188,7 @@ expression: parsed
             help: Some(
                 "Use --gas-budget <u64> to set a gas budget",
             ),
+            severity: Error,
         },
     ],
     [
@@ -185,6 +201,7 @@ expression: parsed
             help: Some(
                 "Expected an argument here",
             ),
+            severity: Error,
         },
         PTBError {
             message: "Gas budget not set.",
@@ -195,6 +212,7 @@ expression: parsed
             help: Some(
                 "Use --gas-budget <u64> to set a gas budget",
             ),
+            severity: Error,
         },
     ],
     [
@@ -205,6 +223,7 @@ expression: parsed
                 end: 17,
             },
             help: None,
+            severity: Error,
         },
         PTBError {
             message: "Gas budget not set.",
@@ -215,6 +234,7 @@ expression: parsed
             help: Some(
                 "Use --gas-budget <u64> to set a gas budget",
             ),
+            severity: Error,
         },
     ],
     [
@@ -227,6 +247,7 @@ expression: parsed
             help: Some(
                 "Expected to find a command here",
             ),
+            severity: Error,
         },
         PTBError {
             message: "Gas budget not set.",
@@ -237,6 +258,7 @@ expression: parsed
             help: Some(
                 "Use --gas-budget <u64> to set a gas budget",
             ),
+            severity: Error,
         },
     ],
     [
@@ -247,6 +269,7 @@ expression: parsed
                 end: 15,
             },
             help: None,
+            severity: Error,
         },
         PTBError {
             message: "Gas budget not set.",
@@ -257,6 +280,7 @@ expression: parsed
             help: Some(
                 "Use --gas-budget <u64> to set a gas budget",
             ),
+            severity: Error,
         },
     ],
     [
@@ -269,6 +293,7 @@ expression: parsed
             help: Some(
                 "Expected an argument here",
             ),
+            severity: Error,
         },
         PTBError {
             message: "Gas budget not set.",
@@ -279,6 +304,7 @@ expression: parsed
             help: Some(
                 "Use --gas-budget <u64> to set a gas budget",
             ),
+            severity: Error,
         },
     ],
     [
@@ -291,6 +317,7 @@ expression: parsed
             help: Some(
                 "Expected an argument here",
             ),
+            severity: Error,
         },
         PTBError {
             message: "Gas budget not set.",
@@ -301,6 +328,7 @@ expression: parsed
             help: Some(
                 "Use --gas-budget <u64> to set a gas budget",
             ),
+            severity: Error,
         },
     ],
     [
@@ -311,6 +339,7 @@ expression: parsed
                 end: 17,
             },
             help: None,
+            severity: Error,
         },
         PTBError {
             message: "Gas budget not set.",
@@ -321,6 +350,7 @@ expression: parsed
             help: Some(
                 "Use --gas-budget <u64> to set a gas budget",
             ),
+            severity: Error,
         },
     ],
     [
@@ -333,6 +363,7 @@ expression: parsed
             help: Some(
                 "Expected to find a command here",
             ),
+            severity: Error,
         },
         PTBError {
             message: "Gas budget not set.",
@@ -343,6 +374,7 @@ expression: parsed
             help: Some(
                 "Use --gas-budget <u64> to set a gas budget",
             ),
+            severity: Error,
         },
     ],
     [
@@ -353,6 +385,7 @@ expression: parsed
                 end: 15,
             },
             help: None,
+            severity: Error,
         },
         PTBError {
             message: "Gas budget not set.",
@@ -363,6 +396,7 @@ expression: parsed
             help: Some(
                 "Use --gas-budget <u64> to set a gas budget",
             ),
+            severity: Error,
         },
     ],
     [
@@ -373,6 +407,7 @@ expression: parsed
                 end: 17,
             },
             help: None,
+            severity: Error,
         },
         PTBError {
             message: "Gas budget not set.",
@@ -383,6 +418,7 @@ expression: parsed
             help: Some(
                 "Use --gas-budget <u64> to set a gas budget",
             ),
+            severity: Error,
         },
     ],
     [
@@ -393,6 +429,7 @@ expression: parsed
                 end: 21,
             },
             help: None,
+            severity: Error,
         },
         PTBError {
             message: "Gas budget not set.",
@@ -403,6 +440,7 @@ expression: parsed
             help: Some(
                 "Use --gas-budget <u64> to set a gas budget",
             ),
+            severity: Error,
         },
     ],
     [
@@ -415,6 +453,7 @@ expression: parsed
             help: Some(
                 "Value addresses can either be a variable in-scope, or a numerical address, e.g., 0xc0ffee",
             ),
+            severity: Error,
         },
         PTBError {
             message: "Gas budget not set.",
@@ -425,6 +464,7 @@ expression: parsed
             help: Some(
                 "Use --gas-budget <u64> to set a gas budget",
             ),
+            severity: Error,
         },
     ],
     [
@@ -437,6 +477,7 @@ expression: parsed
             help: Some(
                 "Expected an argument here",
             ),
+            severity: Error,
         },
         PTBError {
             message: "Gas budget not set.",
@@ -447,6 +488,7 @@ expression: parsed
             help: Some(
                 "Use --gas-budget <u64> to set a gas budget",
             ),
+            severity: Error,
         },
     ],
     [
@@ -457,6 +499,7 @@ expression: parsed
                 end: 8,
             },
             help: None,
+            severity: Error,
         },
         PTBError {
             message: "Gas budget not set.",
@@ -467,6 +510,7 @@ expression: parsed
             help: Some(
                 "Use --gas-budget <u64> to set a gas budget",
             ),
+            severity: Error,
         },
     ],
     [
@@ -479,6 +523,7 @@ expression: parsed
             help: Some(
                 "Expected to find a command here",
             ),
+            severity: Error,
         },
         PTBError {
             message: "Gas budget not set.",
@@ -489,6 +534,7 @@ expression: parsed
             help: Some(
                 "Use --gas-budget <u64> to set a gas budget",
             ),
+            severity: Error,
         },
     ],
     [
@@ -501,6 +547,7 @@ expression: parsed
             help: Some(
                 "Variable names cannot be 'address', 'bool', 'vector', 'some', 'none', 'gas', 'u8', 'u16', 'u32', 'u64', 'u128', or 'u256'.",
             ),
+            severity: Error,
         },
         PTBError {
             message: "Gas budget not set.",
@@ -511,6 +558,7 @@ expression: parsed
             help: Some(
                 "Use --gas-budget <u64> to set a gas budget",
             ),
+            severity: Error,
         },
     ],
     [
@@ -523,6 +571,7 @@ expression: parsed
             help: Some(
                 "Variable names cannot be 'address', 'bool', 'vector', 'some', 'none', 'gas', 'u8', 'u16', 'u32', 'u64', 'u128', or 'u256'.",
             ),
+            severity: Error,
         },
         PTBError {
             message: "Gas budget not set.",
@@ -533,6 +582,7 @@ expression: parsed
             help: Some(
                 "Use --gas-budget <u64> to set a gas budget",
             ),
+            severity: Error,
         },
     ],
     [
@@ -545,6 +595,7 @@ expression: parsed
             help: Some(
                 "Expected an argument here",
             ),
+            severity: Error,
         },
         PTBError {
             message: "Gas budget not set.",
@@ -555,6 +606,7 @@ expression: parsed
             help: Some(
                 "Use --gas-budget <u64> to set a gas budget",
             ),
+            severity: Error,
         },
     ],
     [
@@ -565,6 +617,7 @@ expression: parsed
                 end: 75,
             },
             help: None,
+            severity: Error,
         },
         PTBError {
             message: "Gas budget not set.",
@@ -575,6 +628,7 @@ expression: parsed
             help: Some(
                 "Use --gas-budget <u64> to set a gas budget",
             ),
+            severity: Error,
         },
     ],
     [
@@ -587,6 +641,7 @@ expression: parsed
             help: Some(
                 "Expected an argument here",
             ),
+            severity: Error,
         },
         PTBError {
             message: "Gas budget not set.",
@@ -597,6 +652,7 @@ expression: parsed
             help: Some(
                 "Use --gas-budget <u64> to set a gas budget",
             ),
+            severity: Error,
         },
     ],
     [
@@ -607,6 +663,7 @@ expression: parsed
                 end: 17,
             },
             help: None,
+            severity: Error,
         },
         PTBError {
             message: "Gas budget not set.",
@@ -617,6 +674,7 @@ expression: parsed
             help: Some(
                 "Use --gas-budget <u64> to set a gas budget",
             ),
+            severity: Error,
         },
     ],
     [
@@ -627,6 +685,7 @@ expression: parsed
                 end: 17,
             },
             help: None,
+            severity: Error,
         },
         PTBError {
             message: "Gas budget not set.",
@@ -637,6 +696,7 @@ expression: parsed
             help: Some(
                 "Use --gas-budget <u64> to set a gas budget",
             ),
+            severity: Error,
         },
     ],
     [
@@ -649,6 +709,7 @@ expression: parsed
             help: Some(
                 "Addresses or object IDs require the character '@' in front",
             ),
+            severity: Error,
         },
         PTBError {
             message: "Gas budget not set.",
@@ -659,6 +720,7 @@ expression: parsed
             help: Some(
                 "Use --gas-budget <u64> to set a gas budget",
             ),
+            severity: Error,
         },
     ],
     [
@@ -671,6 +733,7 @@ expression: parsed
             help: Some(
                 "Addresses or object IDs require the character '@' in front",
             ),
+            severity: Error,
         },
         PTBError {
             message: "Gas budget not set.",
@@ -681,6 +744,7 @@ expression: parsed
             help: Some(
                 "Use --gas-budget <u64> to set a gas budget",
             ),
+            severity: Error,
         },
     ],
     [
@@ -693,6 +757,7 @@ expression: parsed
             help: Some(
                 "Expected to find a command here",
             ),
+            severity: Error,
         },
         PTBError {
             message: "Gas budget not set.",
@@ -703,6 +768,7 @@ expression: parsed
             help: Some(
                 "Use --gas-budget <u64> to set a gas budget",
             ),
+            severity: Error,
         },
     ],
     [
@@ -715,6 +781,7 @@ expression: parsed
             help: Some(
                 "Addresses or object IDs require the character '@' in front",
             ),
+            severity: Error,
         },
         PTBError {
             message: "Gas budget not set.",
@@ -725,6 +792,7 @@ expression: parsed
             help: Some(
                 "Use --gas-budget <u64> to set a gas budget",
             ),
+            severity: Error,
         },
     ],
 ]

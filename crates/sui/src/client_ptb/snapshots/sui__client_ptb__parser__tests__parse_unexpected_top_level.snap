@@ -12,6 +12,7 @@ expression: result.unwrap_err()
         help: Some(
             "Expected to find a command here",
         ),
+        severity: Error,
     },
     PTBError {
         message: "Gas budget not set.",
@@ -22,5 +23,6 @@ expression: result.unwrap_err()
         help: Some(
             "Use --gas-budget <u64> to set a gas budget",
         ),
+        severity: Error,
     },
 ]

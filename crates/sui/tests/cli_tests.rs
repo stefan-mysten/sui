@@ -253,7 +253,7 @@ async fn test_ptb_publish_and_complex_arg_resolution() -> Result<(), anyhow::Err
     let package_id_str = package.reference.object_id.to_string();
 
     let start_call_result = SuiClientCommands::Call {
-        package: (package.reference.object_id).into(),
+        package: package.reference.object_id,
         module: "test_module".to_string(),
         function: "new_shared".to_string(),
         type_args: vec![],

@@ -12,6 +12,7 @@ use crate::{
 use anyhow::Result;
 use async_recursion::async_recursion;
 use async_trait::async_trait;
+use miette::Severity;
 use move_binary_format::{
     access::ModuleAccess, binary_views::BinaryIndexedView, file_format::SignatureToken,
     file_format_common::VERSION_MAX,
@@ -45,7 +46,7 @@ use super::ast::{ModuleAccess as PTBModuleAccess, ParsedPTBCommand, Program};
 // ===========================================================================
 // We need to resolve the same argument in different ways depending on the context in which that
 // argument is used. For example, if we are using an object ID as an argument to a move call that
-// expects and object argument in that position, the object ID should be resolved to an object,
+// expects an object argument in that position, the object ID should be resolved to an object,
 // whereas if we are using the same object ID as an argument to a pure value, it should be resolved
 // to a pure value (e.g., the object ID itself). The different ways of resolving this is the
 // purpose of the `Resolver` trait -- different contexts will implement this trait in different
@@ -61,16 +62,16 @@ trait Resolver<'a>: Send {
         &mut self,
         builder: &mut PTBBuilder<'a>,
         loc: Span,
-        x: MoveValue,
+        val: MoveValue,
     ) -> PTBResult<Tx::Argument> {
-        builder.ptb.pure(x).map_err(|e| err!(loc, "{e}"))
+        builder.ptb.pure(val).map_err(|e| err!(loc, "{e}"))
     }
 
     async fn resolve_object_id(
         &mut self,
         builder: &mut PTBBuilder<'a>,
         loc: Span,
-        x: ObjectID,
+        obj_id: ObjectID,
     ) -> PTBResult<Tx::Argument>;
 
     fn re_resolve(&self) -> bool {
@@ -132,7 +133,9 @@ impl<'a> Resolver<'a> for ToObject {
                 mutable: self.is_mut,
             },
             Owner::ObjectOwner(_) => {
-                error!(loc, "Tried to use an object-owned object as an argument")
+                error!(loc => help: {
+                    "{obj_id} is an object-owned object, you can only use immutable, shared, or owned objects here."
+                }, "Cannot use an object-owned object as an argument")
             }
         };
         // Insert the correct object arg that we built above into the transaction.
@@ -155,9 +158,9 @@ impl<'a> Resolver<'a> for ToPure {
         &mut self,
         builder: &mut PTBBuilder<'a>,
         loc: Span,
-        x: ObjectID,
+        obj_id: ObjectID,
     ) -> PTBResult<Tx::Argument> {
-        builder.ptb.pure(x).map_err(|e| err!(loc, "{e}"))
+        builder.ptb.pure(obj_id).map_err(|e| err!(loc, "{e}"))
     }
 }
 
@@ -260,9 +263,13 @@ impl<'a> PTBBuilder<'a> {
     /// If the warn_on_shadowing flag was set, then we will print warnings for any shadowed
     /// variables that we encountered during the building of the PTB.
     pub fn finish(
-        mut self,
+        self,
         warn_on_shadowing: bool,
-    ) -> Result<Tx::ProgrammableTransaction, Vec<PTBError>> {
+    ) -> (
+        Result<Tx::ProgrammableTransaction, Vec<PTBError>>,
+        Vec<PTBError>,
+    ) {
+        let mut warnings = vec![];
         if warn_on_shadowing {
             for (ident, commands) in self.identifiers.iter() {
                 if commands.len() == 1 {
@@ -271,13 +278,14 @@ impl<'a> PTBBuilder<'a> {
 
                 for (i, command_loc) in commands.iter().enumerate() {
                     if i == 0 {
-                        self.errors.push(PTBError {
+                        warnings.push(PTBError {
                             message: format!("Variable '{}' first declared here", ident),
                             span: *command_loc,
                             help: None,
+                            severity: Severity::Warning,
                         });
                     } else {
-                        self.errors.push(PTBError {
+                        warnings.push(PTBError {
                             message: format!(
                                 "Variable '{}' used again here (shadowed) for the {} time.",
                                 ident, to_ordinal_contraction(i + 1)
@@ -285,6 +293,7 @@ impl<'a> PTBBuilder<'a> {
                             span: *command_loc,
                             help: Some("You can either rename this variable, or do not \
                                        pass the `warn-shadows` flag to ignore these types of errors.".to_string()),
+                            severity: Severity::Warning,
                         });
                     }
                 }
@@ -292,17 +301,20 @@ impl<'a> PTBBuilder<'a> {
         }
 
         if !self.errors.is_empty() {
-            return Err(self.errors);
+            return (Err(self.errors), warnings);
         }
 
         let ptb = self.ptb.finish();
-        Ok(ptb)
+        (Ok(ptb), warnings)
     }
 
     pub async fn build(
         mut self,
         program: Program,
-    ) -> Result<Tx::ProgrammableTransaction, Vec<PTBError>> {
+    ) -> (
+        Result<Tx::ProgrammableTransaction, Vec<PTBError>>,
+        Vec<PTBError>,
+    ) {
         for command in program.commands.into_iter() {
             self.handle_command(command).await;
         }
@@ -432,7 +444,7 @@ impl<'a> PTBBuilder<'a> {
             return self.resolve(loc.wrap(arg), ToPure).await;
         }
 
-        // Otherwise it'a ambiguous what the value should be, and we need to turn to the signature
+        // Otherwise it's ambiguous what the value should be, and we need to turn to the signature
         // to determine it.
         let mut is_receiving = false;
         let mut is_mutable = false;
@@ -466,8 +478,6 @@ impl<'a> PTBBuilder<'a> {
             }
         }
 
-        // If the argument is an object argument resolve it to an object argument, otherwise
-        // resolve it to a receiving object argument.
         // Note: need to re-resolve an argument possibly since it may be used immutably first, and
         // then mutably.
         self.resolve(loc.wrap(arg), ToObject::new(is_receiving, is_mutable))
