@@ -2,17 +2,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::path::Path;
-use sui::client_ptb::ptb::PTB;
+#[cfg(not(msim))]
 use sui_types::transaction::{CallArg, ObjectArg};
-use test_cluster::TestClusterBuilder;
 
 const TEST_DIR: &str = "tests";
 
 #[cfg(not(msim))]
 #[tokio::main]
-async fn test_ptb_files(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+async fn test_ptb_files(path: &Path) -> datatest_stable::Result<()> {
+    use sui::client_ptb::ptb::PTB;
     use sui::client_ptb::{error::build_error_reports, ptb::PTBPreview, utils::to_source_string};
     use test_cluster::TestCluster;
+    use test_cluster::TestClusterBuilder;
     use tokio::sync::OnceCell;
 
     static CLUSTER: OnceCell<TestCluster> = OnceCell::const_new();
@@ -94,6 +95,7 @@ async fn test_ptb_files(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+#[cfg(not(msim))]
 fn stable_call_arg_display(ca: &CallArg) -> String {
     match ca {
         CallArg::Pure(v) => format!("Pure({:?})", v),
@@ -105,6 +107,12 @@ fn stable_call_arg_display(ca: &CallArg) -> String {
             ObjectArg::Receiving(_) => "Receiving".to_string(),
         },
     }
+}
+
+#[cfg(msim)]
+#[tokio::main]
+async fn test_ptb_files(_: &Path) -> datatest_stable::Result<()> {
+    Ok(())
 }
 
 datatest_stable::harness!(test_ptb_files, TEST_DIR, r".*\.ptb$",);

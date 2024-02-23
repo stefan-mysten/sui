@@ -1,10 +1,6 @@
 // Copyright (c) Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-// TODO:
-// * [ ] Handle mut properly
-// * [ ] Handle other pure values properly (what are they?)
-
 use crate::{
     client_commands::{compile_package, upgrade_package},
     client_ptb::{
@@ -25,11 +21,10 @@ use move_command_line_common::{
     address::{NumericalAddress, ParsedAddress},
     parser::NumberFormat,
 };
-use move_core_types::{account_address::AccountAddress, ident_str};
+use move_core_types::{account_address::AccountAddress, ident_str, runtime_value::MoveValue};
 use move_package::BuildConfig;
-use serde::Serialize;
 use std::{collections::BTreeMap, path::PathBuf};
-use sui_json::is_receiving_argument;
+use sui_json::{is_primitive_type_tag, is_receiving_argument, primitive_type};
 use sui_json_rpc_types::{SuiObjectData, SuiObjectDataOptions, SuiRawData};
 use sui_protocol_config::{Chain, ProtocolConfig};
 use sui_sdk::apis::ReadApi;
@@ -63,11 +58,11 @@ use super::ast::{ModuleAccess as PTBModuleAccess, ParsedPTBCommand, Program};
 #[async_trait]
 trait Resolver<'a>: Send {
     /// Resolve a pure value. This should almost always resolve to a pure value.
-    async fn pure<T: Serialize + Send>(
+    async fn pure(
         &mut self,
         builder: &mut PTBBuilder<'a>,
         loc: Span,
-        x: T,
+        x: MoveValue,
     ) -> PTBResult<Tx::Argument> {
         builder.ptb.pure(x).map_err(|e| err!(loc, "{e}"))
     }
@@ -78,14 +73,16 @@ trait Resolver<'a>: Send {
         loc: Span,
         x: ObjectID,
     ) -> PTBResult<Tx::Argument>;
+
+    fn re_resolve(&self) -> bool {
+        false
+    }
 }
 
 /// A resolver that resolves object IDs to object arguments.
 /// * If `is_receiving` is true, then the object argument will be resolved to a receiving object
 ///   argument.
 /// * If `is_mut` is true, then the object argument will be resolved to a mutable object argument.
-/// This currently always defaults to `true`, but we will want to make better decisions about this
-/// in the future.
 struct ToObject {
     is_receiving: bool,
     is_mut: bool,
@@ -101,13 +98,10 @@ impl Default for ToObject {
 }
 
 impl ToObject {
-    fn new(is_receiving: bool) -> Self {
+    fn new(is_receiving: bool, is_mut: bool) -> Self {
         Self {
             is_receiving,
-            // TODO: Make mutability decision be passed in from calling context.
-            // For now we assume all uses of shared objects are mutable.
-            // TODO(tzakian): Actually fix this
-            is_mut: true,
+            is_mut,
         }
     }
 }
@@ -145,6 +139,12 @@ impl<'a> Resolver<'a> for ToObject {
         // Insert the correct object arg that we built above into the transaction.
         builder.ptb.obj(obj_arg).map_err(|e| err!(loc, "{e}"))
     }
+
+    // We always re-resolve object IDs to object arguments if we need it mutably -- we could have
+    // added it earlier as an immutable argument.
+    fn re_resolve(&self) -> bool {
+        self.is_mut
+    }
 }
 
 /// A resolver that resolves object IDs that it encounters to pure PTB values.
@@ -159,22 +159,6 @@ impl<'a> Resolver<'a> for ToPure {
         x: ObjectID,
     ) -> PTBResult<Tx::Argument> {
         builder.ptb.pure(x).map_err(|e| err!(loc, "{e}"))
-    }
-}
-
-/// A resolver that will not perform any type of resolution. This is useful to see if we've already
-/// resolved an argument or not.
-struct NoResolution;
-
-#[async_trait]
-impl<'a> Resolver<'a> for NoResolution {
-    async fn resolve_object_id(
-        &mut self,
-        _builder: &mut PTBBuilder<'a>,
-        loc: Span,
-        _x: ObjectID,
-    ) -> PTBResult<Tx::Argument> {
-        error!(loc, "Don't resolve arguments and that's fine");
     }
 }
 
@@ -202,7 +186,7 @@ pub struct PTBBuilder<'a> {
     identifiers: BTreeMap<String, Vec<Span>>,
     /// The arguments that we need to resolve. This is a map from identifiers to the argument
     /// values -- they haven't been resolved to a transaction argument yet.
-    arguments_to_resolve: BTreeMap<String, Spanned<PTBArg>>,
+    arguments_to_resolve: BTreeMap<String, ArgWithHistory>,
     /// The arguments that we have resolved. This is a map from identifiers to the actual
     /// transaction arguments.
     resolved_arguments: BTreeMap<String, Tx::Argument>,
@@ -223,21 +207,39 @@ enum ResolvedAccess {
     DottedString(String),
 }
 
-/// Check if a type tag resolves to a pure value or not.
-fn is_pure(t: &TypeTag) -> anyhow::Result<bool> {
-    Ok(match t {
-        TypeTag::Bool
-        | TypeTag::U8
-        | TypeTag::U64
-        | TypeTag::U128
-        | TypeTag::Address
-        | TypeTag::U16
-        | TypeTag::U32
-        | TypeTag::U256 => true,
-        TypeTag::Vector(t) => is_pure(t)?,
-        TypeTag::Struct(_) => false,
-        TypeTag::Signer => anyhow::bail!("'signer' is not a valid type"),
-    })
+/// Hold a PTB argument, always remembering its most recent state even if it's already been
+/// resolved.
+#[derive(Debug)]
+enum ArgWithHistory {
+    Resolved(Spanned<PTBArg>),
+    Unresolved(Spanned<PTBArg>),
+}
+
+impl ArgWithHistory {
+    fn get_unresolved(&self) -> Option<&Spanned<PTBArg>> {
+        match self {
+            ArgWithHistory::Resolved(_) => None,
+            ArgWithHistory::Unresolved(x) => Some(x),
+        }
+    }
+
+    fn get(&self) -> &Spanned<PTBArg> {
+        match self {
+            ArgWithHistory::Resolved(x) => x,
+            ArgWithHistory::Unresolved(x) => x,
+        }
+    }
+
+    fn resolve(&mut self) {
+        *self = match self {
+            ArgWithHistory::Resolved(x) => ArgWithHistory::Resolved(x.clone()),
+            ArgWithHistory::Unresolved(x) => ArgWithHistory::Resolved(x.clone()),
+        }
+    }
+
+    fn is_resolved(&self) -> bool {
+        matches!(self, ArgWithHistory::Resolved(_))
+    }
 }
 
 impl<'a> PTBBuilder<'a> {
@@ -423,37 +425,33 @@ impl<'a> PTBBuilder<'a> {
         sp!(loc, arg): Spanned<PTBArg>,
         param: &SignatureToken,
     ) -> PTBResult<Tx::Argument> {
-        // See if we've already resolved this argument or if it's an unambiguously pure value
-        if let Ok(res) = self.resolve(loc.wrap(arg.clone()), NoResolution).await {
-            return Ok(res);
+        let (is_primitive, _) = primitive_type(view, ty_args, param);
+
+        // If it's a primitive value, see if we've already resolved this argument. Otherwise, we
+        // need to resolve it.
+        if is_primitive {
+            return self.resolve(loc.wrap(arg), ToPure).await;
         }
 
         // Otherwise it'a ambiguous what the value should be, and we need to turn to the signature
         // to determine it.
-        let mut is_object_arg = false;
         let mut is_receiving = false;
+        let mut is_mutable = false;
 
         // traverse the types in the signature to see if the argument is an object argument or not,
         // and also determine if it's a receiving argument or not.
         for tok in param.preorder_traversal() {
             match tok {
                 SignatureToken::Struct(..) | SignatureToken::StructInstantiation(..) => {
-                    is_object_arg = true;
                     is_receiving |= is_receiving_argument(view, tok);
-                    // break;
                 }
                 SignatureToken::TypeParameter(idx) => {
-                    let Some(tag) = ty_args.get(*idx as usize) else {
+                    if *idx as usize >= ty_args.len() {
                         error!(loc, "Not enough type parameters supplied for Move call");
-                    };
-                    // NB: we don't need to do any type of special casing of structs for e.g.,
-                    // `Option` and the like since we're dealing with parsed values, and will
-                    // handle options (and nested options) in the `resolve` function before we get
-                    // to this point.
-                    if !is_pure(tag).map_err(|e| err!(loc, "{e}"))? {
-                        is_object_arg = true;
-                        break;
                     }
+                }
+                SignatureToken::MutableReference(_) => {
+                    is_mutable = true;
                 }
                 SignatureToken::Bool
                 | SignatureToken::U8
@@ -465,19 +463,16 @@ impl<'a> PTBBuilder<'a> {
                 | SignatureToken::U16
                 | SignatureToken::U32
                 | SignatureToken::U256
-                | SignatureToken::Reference(_)
-                | SignatureToken::MutableReference(_) => {}
+                | SignatureToken::Reference(_) => {}
             }
         }
 
         // If the argument is an object argument resolve it to an object argument, otherwise
         // resolve it to a receiving object argument.
-        if is_object_arg {
-            self.resolve(loc.wrap(arg), ToObject::new(is_receiving))
-                .await
-        } else {
-            self.resolve(loc.wrap(arg), ToPure).await
-        }
+        // Note: need to re-resolve an argument possibly since it may be used immutably first, and
+        // then mutably.
+        self.resolve(loc.wrap(arg), ToObject::new(is_receiving, is_mutable))
+            .await
     }
 
     /// Resolve the arguments to a Move call based on the type information about the function
@@ -607,30 +602,46 @@ impl<'a> PTBBuilder<'a> {
         mut ctx: impl Resolver<'a> + 'async_recursion,
     ) -> PTBResult<Tx::Argument> {
         match arg {
-            PTBArg::Bool(b) => ctx.pure(self, arg_loc, b).await,
-            PTBArg::U8(u) => ctx.pure(self, arg_loc, u).await,
-            PTBArg::U16(u) => ctx.pure(self, arg_loc, u).await,
-            PTBArg::U32(u) => ctx.pure(self, arg_loc, u).await,
-            PTBArg::U64(u) => ctx.pure(self, arg_loc, u).await,
-            PTBArg::U128(u) => ctx.pure(self, arg_loc, u).await,
-            PTBArg::U256(u) => ctx.pure(self, arg_loc, u).await,
-            PTBArg::String(s) => ctx.pure(self, arg_loc, s).await,
+            a @ (PTBArg::Bool(_)
+            | PTBArg::U8(_)
+            | PTBArg::U16(_)
+            | PTBArg::U32(_)
+            | PTBArg::U64(_)
+            | PTBArg::U128(_)
+            | PTBArg::U256(_)
+            | PTBArg::String(_)
+            | PTBArg::Option(_)
+            | PTBArg::Vector(_)) => {
+                ctx.pure(self, arg_loc, a.to_pure_move_value(arg_loc)?)
+                    .await
+            }
             PTBArg::Gas => Ok(Tx::Argument::GasCoin),
             // NB: the ordering of these lines is important so that shadowing is properly
             // supported.
             // If we encounter an identifier that we have not already resolved, then we resolve the
             // value and return it.
-            PTBArg::Identifier(i) if self.arguments_to_resolve.contains_key(&i) => {
-                let arg = self.arguments_to_resolve[&i].clone();
+            PTBArg::Identifier(i)
+                if self
+                    .arguments_to_resolve
+                    .get(&i)
+                    .is_some_and(|arg_hist| !arg_hist.is_resolved()) =>
+            {
+                let arg_hist = self.arguments_to_resolve.get(&i).unwrap();
+                let arg = arg_hist.get().clone();
                 let resolved = self.resolve(arg, ctx).await?;
-                self.arguments_to_resolve.remove(&i);
+                self.arguments_to_resolve.get_mut(&i).unwrap().resolve();
                 self.resolved_arguments.insert(i, resolved);
                 Ok(resolved)
             }
             // If the identifier does not need to be resolved, but has already been resolved, then
             // we return the resolved value.
             PTBArg::Identifier(i) if self.resolved_arguments.contains_key(&i) => {
-                Ok(self.resolved_arguments[&i])
+                if ctx.re_resolve() && self.arguments_to_resolve.contains_key(&i) {
+                    self.resolve(self.arguments_to_resolve[&i].get().clone(), ctx)
+                        .await
+                } else {
+                    Ok(self.resolved_arguments[&i])
+                }
             }
             // Lastly -- look to see if this is an address that has been either declared in scope,
             // or that is coming from an external source (e.g., the keystore).
@@ -639,22 +650,13 @@ impl<'a> PTBBuilder<'a> {
                 // so we didnt' have an address for it before), so we tag it with its first usage
                 // location put it in the arguments to resolve and resolve away.
                 let addr = self.addresses[&i];
-                self.arguments_to_resolve.insert(
-                    i.clone(),
-                    arg_loc.wrap(PTBArg::Address(NumericalAddress::new(
-                        addr.into_bytes(),
-                        NumberFormat::Hex,
-                    ))),
-                );
+                let arg = arg_loc.wrap(PTBArg::Address(NumericalAddress::new(
+                    addr.into_bytes(),
+                    NumberFormat::Hex,
+                )));
+                self.arguments_to_resolve
+                    .insert(i.clone(), ArgWithHistory::Unresolved(arg.clone()));
                 self.resolve(arg_loc.wrap(PTBArg::Identifier(i)), ctx).await
-            }
-            x @ PTBArg::Option(_) => {
-                ctx.pure(self, arg_loc, x.to_pure_move_value(arg_loc)?)
-                    .await
-            }
-            x @ PTBArg::Vector(_) => {
-                ctx.pure(self, arg_loc, x.to_pure_move_value(arg_loc)?)
-                    .await
             }
             PTBArg::Address(addr) => {
                 let object_id = ObjectID::from_address(addr.into_inner());
@@ -670,54 +672,55 @@ impl<'a> PTBBuilder<'a> {
                     sp!(l, ResolvedAccess::DottedString(string)) => {
                         self.resolve(l.wrap(PTBArg::Identifier(string)), ctx).await
                     }
-                    sp!(_, ResolvedAccess::ResultAccess(access)) => match self
-                        .resolved_arguments
-                        .get(&head.value)
-                    {
-                        Some(Tx::Argument::Result(u)) => Ok(Tx::Argument::NestedResult(*u, access)),
-                        // Tried to access into a nested result, input, or gascoin
-                        Some(
-                            x @ (Tx::Argument::NestedResult(..)
-                            | Tx::Argument::Input(..)
-                            | Tx::Argument::GasCoin),
-                        ) => {
-                            error!(
-                                arg_loc,
-                                "Tried to access a nested result, input, or gascoin {}: {}",
-                                head.value,
-                                x,
-                            );
-                        }
-                        // Unable to resolve, so now see if we can resolve it to an alias, i.e.,
-                        // handle a alias that looks something like `foo.0`
-                        None => {
-                            let formatted_access = format!("{}.{}", head.value, access);
-                            if !self.addresses.contains_key(&formatted_access)
-                                && !self.identifiers.contains_key(&formatted_access)
-                            {
-                                match self.did_you_mean_identifier(&head.value) {
-                                    Some(similars) => {
-                                        error!(
-                                            head.span => help: { "{}", similars },
-                                            "Tried to access an unresolved identifier: {}", head.value
-                                        );
-                                    }
-                                    None => {
-                                        error!(
-                                            head.span,
-                                            "Tried to access an unresolved identifier: {}",
-                                            head.value
-                                        );
+                    sp!(_, ResolvedAccess::ResultAccess(access)) => {
+                        match self.resolved_arguments.get(&head.value) {
+                            Some(Tx::Argument::Result(u)) => {
+                                Ok(Tx::Argument::NestedResult(*u, access))
+                            }
+                            // Tried to access into a nested result, input, or gascoin
+                            Some(
+                                x @ (Tx::Argument::NestedResult(..)
+                                | Tx::Argument::Input(..)
+                                | Tx::Argument::GasCoin),
+                            ) => {
+                                error!(
+                                    arg_loc,
+                                    "Tried to access a nested result, input, or gascoin {}: {}",
+                                    head.value,
+                                    x,
+                                );
+                            }
+                            // Unable to resolve, so now see if we can resolve it to an alias, i.e.,
+                            // handle a alias that looks something like `foo.0`
+                            None => {
+                                let formatted_access = format!("{}.{}", head.value, access);
+                                if !self.addresses.contains_key(&formatted_access)
+                                    && !self.identifiers.contains_key(&formatted_access)
+                                {
+                                    match self.did_you_mean_identifier(&head.value) {
+                                        Some(similars) => {
+                                            error!(
+                                                head.span => help: { "{}", similars },
+                                                "Tried to access an unresolved identifier: {}", head.value
+                                            );
+                                        }
+                                        None => {
+                                            error!(
+                                                head.span,
+                                                "Tried to access an unresolved identifier: {}",
+                                                head.value
+                                            );
+                                        }
                                     }
                                 }
+                                self.resolve(
+                                    arg_loc.wrap(PTBArg::Identifier(formatted_access.clone())),
+                                    ctx,
+                                )
+                                .await
                             }
-                            self.resolve(
-                                arg_loc.wrap(PTBArg::Identifier(formatted_access.clone())),
-                                ctx,
-                            )
-                            .await
                         }
-                    },
+                    }
                 }
             }
             // Unable to resolve an identifer to anything at this point -- error and see if we can
@@ -798,14 +801,15 @@ impl<'a> PTBBuilder<'a> {
             ParsedPTBCommand::Assign(sp!(ident_loc, i), Some(arg_w_loc)) => {
                 self.declare_identifier(i.clone(), ident_loc);
                 self.declare_possible_address_binding(i.clone(), &arg_w_loc);
-                self.arguments_to_resolve.insert(i, arg_w_loc);
+                self.arguments_to_resolve
+                    .insert(i, ArgWithHistory::Unresolved(arg_w_loc));
             }
             ParsedPTBCommand::MakeMoveVec(sp!(ty_loc, ty_arg), sp!(_, args)) => {
                 let ty_arg = ty_arg
                     .into_type_tag(&resolve_address)
                     .map_err(|e| err!(ty_loc, "{e}"))?;
                 let mut vec_args: Vec<Tx::Argument> = vec![];
-                if is_pure(&ty_arg).map_err(|e| err!(ty_loc, "{e}"))? {
+                if is_primitive_type_tag(&ty_arg) {
                     for arg in args.into_iter() {
                         let arg = self.resolve(arg, ToPure).await?;
                         vec_args.push(arg);
@@ -922,6 +926,7 @@ impl<'a> PTBBuilder<'a> {
                     arg = self
                         .arguments_to_resolve
                         .get(&id)
+                        .and_then(|x| x.get_unresolved())
                         .ok_or_else(|| err!(loc, "Unable to find object ID argument"))?
                         .clone();
                 }

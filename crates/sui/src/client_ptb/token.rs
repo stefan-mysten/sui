@@ -74,7 +74,7 @@ impl<'l> Lexeme<'l> {
 
     /// Returns true if this lexeme signifies the end of the current command.
     pub fn is_command_end(&self) -> bool {
-        self.is_terminal() || self.0 == Token::Command
+        self.is_terminal() || [Token::Command, Token::Publish, Token::Upgrade].contains(&self.0)
     }
 }
 
