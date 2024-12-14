@@ -333,6 +333,8 @@ pub fn build_from_resolution_graph(
             (address != AccountAddress::ZERO).then_some(address)
         })
         .collect();
+    println!("Orig deps: {:?}", dependency_ids);
+    println!("All compiled units ids: {:?}", deps);
     dependency_ids.published.retain(|_, id| deps.contains(id));
 
     Ok(CompiledPackage {

@@ -379,6 +379,7 @@ impl Package {
                     continue;
                 }
                 // There is no lock file, but perhaps there is a `published-at` in the manifest.
+                // but what if published-at is the upgraded package id?
                 else if let Some(published_at) = self
                     .source_package
                     .package
