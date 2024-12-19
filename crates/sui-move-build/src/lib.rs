@@ -325,16 +325,17 @@ pub fn build_from_resolution_graph(
         // TODO(https://github.com/MystenLabs/sui/issues/69): Run Move linker
     }
 
+    println!("Orig deps: {:?}", dependency_ids);
+
     // Filter out packages that are in the manifest but not referenced in the source code.
     let deps: BTreeSet<_> = package
         .all_compiled_units()
         .filter_map(|x| {
             let address = x.address.into_inner();
+            println!("Name: {}, address: {}", x.name, address);
             (address != AccountAddress::ZERO).then_some(address)
         })
         .collect();
-    println!("Orig deps: {:?}", dependency_ids);
-    println!("All compiled units ids: {:?}", deps);
     dependency_ids.published.retain(|_, id| deps.contains(id));
 
     Ok(CompiledPackage {

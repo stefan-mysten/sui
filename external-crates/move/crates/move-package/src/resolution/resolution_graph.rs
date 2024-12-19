@@ -362,6 +362,12 @@ impl Package {
         resolving_table: &mut ResolvingTable,
         chain_id: &Option<String>,
     ) -> Result<()> {
+        println!(
+            "Resolving addresses for package '{}'",
+            &self.source_package.package.name
+        );
+        println!("Resolving table: {:?}", resolving_table);
+        println!("Chain ID: {:?}", chain_id);
         let pkg_id = custom_resolve_pkg_id(&self.source_package).with_context(|| {
             format!(
                 "Resolving package name for '{}'",
@@ -375,18 +381,6 @@ impl Package {
                 // `Move.lock` when a package is to be published or upgraded.
                 if let Some(original_id) = self.resolve_original_id_from_lock(chain_id) {
                     let addr = AccountAddress::from_str(&original_id)?;
-                    resolving_table.define((pkg_id, *name), Some(addr))?;
-                    continue;
-                }
-                // There is no lock file, but perhaps there is a `published-at` in the manifest.
-                // but what if published-at is the upgraded package id?
-                else if let Some(published_at) = self
-                    .source_package
-                    .package
-                    .custom_properties
-                    .get(&Symbol::from("published-at"))
-                {
-                    let addr = AccountAddress::from_str(published_at)?;
                     resolving_table.define((pkg_id, *name), Some(addr))?;
                     continue;
                 }
