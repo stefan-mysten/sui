@@ -2,14 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use clap::Parser;
-use sui_types::supported_protocol_versions::Chain;
 use std::str::FromStr;
+use sui_types::supported_protocol_versions::Chain;
 
 pub mod data_store;
 pub mod environment;
 pub mod epoch_store;
 pub mod errors;
 pub mod execution;
+pub mod gql_queries;
 pub mod replay_txn_data;
 
 #[derive(Parser, Clone, Debug)]
@@ -72,5 +73,5 @@ impl FromStr for Node {
             _ => Ok(Node::Custom(s.to_string())),
         }
     }
-    
 }
+
