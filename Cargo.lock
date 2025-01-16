@@ -13745,7 +13745,7 @@ dependencies = [
 [[package]]
 name = "sui-graphql-client"
 version = "0.1.0"
-source = "git+https://github.com/MystenLabs/sui-rust-sdk.git?rev=322d14b9baf24a5abbf263ea97bdc592c4e57936#322d14b9baf24a5abbf263ea97bdc592c4e57936"
+source = "git+https://github.com/MystenLabs/sui-rust-sdk.git?rev=e808cf7110696a678947c8639ed9c6e0d90346e5#e808cf7110696a678947c8639ed9c6e0d90346e5"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -13768,7 +13768,7 @@ dependencies = [
 [[package]]
 name = "sui-graphql-client-build"
 version = "0.1.0"
-source = "git+https://github.com/MystenLabs/sui-rust-sdk.git?rev=322d14b9baf24a5abbf263ea97bdc592c4e57936#322d14b9baf24a5abbf263ea97bdc592c4e57936"
+source = "git+https://github.com/MystenLabs/sui-rust-sdk.git?rev=e808cf7110696a678947c8639ed9c6e0d90346e5#e808cf7110696a678947c8639ed9c6e0d90346e5"
 dependencies = [
  "cynic-codegen",
 ]
@@ -15226,7 +15226,7 @@ dependencies = [
 [[package]]
 name = "sui-sdk-types"
 version = "0.0.1"
-source = "git+https://github.com/MystenLabs/sui-rust-sdk.git?rev=322d14b9baf24a5abbf263ea97bdc592c4e57936#322d14b9baf24a5abbf263ea97bdc592c4e57936"
+source = "git+https://github.com/MystenLabs/sui-rust-sdk.git?rev=e808cf7110696a678947c8639ed9c6e0d90346e5#e808cf7110696a678947c8639ed9c6e0d90346e5"
 dependencies = [
  "base64ct",
  "bcs",
@@ -15694,7 +15694,7 @@ dependencies = [
 [[package]]
 name = "sui-transaction-builder"
 version = "0.1.0"
-source = "git+https://github.com/MystenLabs/sui-rust-sdk.git?rev=322d14b9baf24a5abbf263ea97bdc592c4e57936#322d14b9baf24a5abbf263ea97bdc592c4e57936"
+source = "git+https://github.com/MystenLabs/sui-rust-sdk.git?rev=e808cf7110696a678947c8639ed9c6e0d90346e5#e808cf7110696a678947c8639ed9c6e0d90346e5"
 dependencies = [
  "base64ct",
  "bcs",
