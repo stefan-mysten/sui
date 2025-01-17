@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::{
-    epoch_store::{EpochStore, EpochStoreEager},
+    epoch_store::{EpochStore, EpochStoreEager, EpochStoreEagerNew},
     errors::ReplayError,
     gql_queries::package_versions_for_replay,
     Node,
@@ -273,6 +273,50 @@ impl DataStore {
         Ok(effects)
     }
 
+    pub async fn epochs(&self) -> Result<BTreeMap<u64, EpochData>, ReplayError> {
+        let mut pag_filter = PaginationFilter {
+            direction: Direction::Forward,
+            cursor: None,
+            limit: None,
+        };
+
+        let mut epochs_data = BTreeMap::<u64, EpochData>::new();
+
+        loop {
+            let paged_epochs = crate::gql_queries::epochs(&self.client, pag_filter)
+                .await
+                .map_err(|e| {
+                    let err = format!("{:?}", e);
+                    ReplayError::GenericError { err }
+                })
+                .unwrap();
+            let (page_info, data) = paged_epochs.into_parts();
+            for epoch in data {
+                if epoch.transaction_blocks.nodes.is_empty() {
+                    continue;
+                }
+                epochs_data.insert(epoch.epoch_id, epoch.try_into()?);
+            }
+            if page_info.has_next_page {
+                pag_filter = PaginationFilter {
+                    direction: Direction::Forward,
+                    cursor: page_info.end_cursor.clone(),
+                    limit: None,
+                };
+            } else {
+                break;
+            }
+        }
+
+        Ok(epochs_data)
+    }
+
+    pub async fn epoch_store_1(&self) -> Result<EpochStore, ReplayError> {
+        Ok(EpochStore::EpochInfoEagerNew(EpochStoreEagerNew {
+            data: self.epochs().await?,
+        }))
+    }
+
     //
     // Epoch operations
     //
@@ -301,7 +345,7 @@ impl DataStore {
             }
             let paged_events = self
                 .client
-                .events(Some(filter.clone()), pagination)
+                .events(Some(filter.clone()), pagination.clone())
                 .await
                 .map_err(|e| {
                     let err = format!("{:?}", e);
@@ -334,11 +378,7 @@ impl DataStore {
                 }
             }
             if page_info.has_previous_page {
-                pagination = PaginationFilter {
-                    direction: Direction::Backward,
-                    cursor: page_info.start_cursor.clone(),
-                    limit: None,
-                };
+                pagination.cursor = page_info.start_cursor;
             } else {
                 break;
             }
@@ -393,4 +433,13 @@ impl DataStore {
             digest: digest.to_string(),
         })
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EpochData {
+    pub epoch_id: u64,
+    pub start_timestamp: u64,
+    pub rgp: u64,
+    pub protocol_version: u64,
+    pub last_tx_digest: TransactionDigest,
 }
