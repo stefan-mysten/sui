@@ -5,6 +5,7 @@ use crate::{
     epoch_store::{EpochStore, EpochStoreEager, EpochStoreEagerNew},
     errors::ReplayError,
     gql_queries::package_versions_for_replay,
+    gql_queries::EpochData,
     Node,
 };
 
@@ -433,13 +434,4 @@ impl DataStore {
             digest: digest.to_string(),
         })
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EpochData {
-    pub epoch_id: u64,
-    pub start_timestamp: u64,
-    pub rgp: u64,
-    pub protocol_version: u64,
-    pub last_tx_digest: TransactionDigest,
 }

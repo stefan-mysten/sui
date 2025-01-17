@@ -5,7 +5,8 @@
 // Epoch store and API
 //
 
-use crate::{data_store::DataStore, data_store::EpochData, errors::ReplayError};
+use crate::gql_queries::EpochData;
+use crate::{data_store::DataStore, errors::ReplayError};
 use std::{cmp::Ordering, collections::BTreeMap};
 use sui_types::{
     committee::ProtocolVersion,
