@@ -597,9 +597,9 @@ anemo-cli = { git = "https://github.com/mystenlabs/anemo.git", rev = "e609f7697e
 anemo-tower = { git = "https://github.com/mystenlabs/anemo.git", rev = "e609f7697ed6169bf0760882a0b6c032a57e4f3b" }
 
 # core-types with json format for REST api
-sui-sdk-types = { git = "https://github.com/MystenLabs/sui-rust-sdk.git", rev = "e808cf7110696a678947c8639ed9c6e0d90346e5", features = ["hash", "serde"] }
-sui-sdk-transaction-builder = { git = "https://github.com/MystenLabs/sui-rust-sdk.git", rev = "e808cf7110696a678947c8639ed9c6e0d90346e5", package = "sui-transaction-builder" }
-sui-graphql-client = { git = "https://github.com/MystenLabs/sui-rust-sdk.git", rev = "e808cf7110696a678947c8639ed9c6e0d90346e5", package = "sui-graphql-client" }
+sui-sdk-types = { git = "https://github.com/MystenLabs/sui-rust-sdk.git", rev = "9add7d2ee25f5fae181672a8a0d9ed80bc8487b4", features = ["hash", "serde"] }
+sui-sdk-transaction-builder = { git = "https://github.com/MystenLabs/sui-rust-sdk.git", rev = "9add7d2ee25f5fae181672a8a0d9ed80bc8487b4", package = "sui-transaction-builder" }
+sui-graphql-client = { git = "https://github.com/MystenLabs/sui-rust-sdk.git", rev = "9add7d2ee25f5fae181672a8a0d9ed80bc8487b4", package = "sui-graphql-client" }
 
 ### Workspace Members ###
 anemo-benchmark = { path = "crates/anemo-benchmark" }
