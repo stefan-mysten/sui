@@ -106,4 +106,3 @@ pub enum ReplayError {
     #[error("Failed to parse integer: {0}")]
     ParseIntConversionError(#[from] ParseIntError),
 }
-
