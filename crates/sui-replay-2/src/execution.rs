@@ -2,29 +2,26 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::{
-    environment::{
-        is_framework_package, ReplayEnvironment,
-    }, 
-    errors::ReplayError, replay_txn_data::ReplayTransaction
+    environment::{is_framework_package, ReplayEnvironment},
+    errors::ReplayError,
+    replay_txn_data::ReplayTransaction,
 };
-use std::{collections::HashSet, path::PathBuf, sync::Arc};
 use move_core_types::{
-    account_address::AccountAddress, 
-    language_storage::{ModuleId, StructTag}, 
+    account_address::AccountAddress,
+    language_storage::{ModuleId, StructTag},
     resolver::{ModuleResolver, ResourceResolver},
 };
+use std::{collections::HashSet, path::PathBuf, sync::Arc};
 use sui_execution::Executor;
 use sui_types::{
-    base_types::{ObjectID, ObjectRef, SequenceNumber, VersionNumber}, 
-    committee::EpochId, 
-    error::SuiResult, 
-    gas::SuiGasStatus, 
-    metrics::LimitsMetrics, 
-    object::Object, 
-    storage::{
-        BackingPackageStore, ChildObjectResolver, ObjectStore, PackageObject, ParentSync,
-    }, 
-    supported_protocol_versions::ProtocolConfig, 
+    base_types::{ObjectID, ObjectRef, SequenceNumber, VersionNumber},
+    committee::EpochId,
+    error::SuiResult,
+    gas::SuiGasStatus,
+    metrics::LimitsMetrics,
+    object::Object,
+    storage::{BackingPackageStore, ChildObjectResolver, ObjectStore, PackageObject, ParentSync},
+    supported_protocol_versions::ProtocolConfig,
     transaction::CheckedInputObjects,
 };
 use tracing::info;
@@ -53,29 +50,29 @@ pub fn execute_transaction_to_effects(
             txn.reference_gas_price,
             &protocol_config,
         )
-            .expect("Failed to create gas status")
+        .expect("Failed to create gas status")
     };
 
-    let store: ReplayStore<'_> = ReplayStore { env, epoch: txn.epoch };
+    let store: ReplayStore<'_> = ReplayStore {
+        env,
+        epoch: txn.epoch,
+    };
     let (_inner_store, gas_status, effects, result) =
-        txn
-            .executor
-            .executor
-            .execute_transaction_to_effects(
-                &store,
-                &protocol_config,
-                txn.executor.metrics.clone(),
-                false, // expensive checks
-                &certificate_deny_set,
-                &txn.epoch,
-                txn.epoch_start_timestamp,
-                CheckedInputObjects::new_for_replay(txn.input_objects),
-                txn.gas,
-                gas_status,
-                txn.kind,
-                txn.sender,
-                txn.digest,
-            );
+        txn.executor.executor.execute_transaction_to_effects(
+            &store,
+            &protocol_config,
+            txn.executor.metrics.clone(),
+            false, // expensive checks
+            &certificate_deny_set,
+            &txn.epoch,
+            txn.epoch_start_timestamp,
+            CheckedInputObjects::new_for_replay(txn.input_objects),
+            txn.gas,
+            gas_status,
+            txn.kind,
+            txn.sender,
+            txn.digest,
+        );
     info!("Transaction executed: {:?}", result);
     info!("Effects: {:?}", effects);
     info!("Gas status: {:?}", gas_status);
@@ -89,8 +86,12 @@ impl ReplayExecutor {
         enable_profiler: Option<PathBuf>,
     ) -> Result<Self, ReplayError> {
         let silent = true; // disable Move debug API
-        let executor = sui_execution::executor(&protocol_config, silent, enable_profiler)
-            .map_err(|e| ReplayError::ExecutorError { err: format!("{:?}", e) })?;
+        let executor =
+            sui_execution::executor(&protocol_config, silent, enable_profiler).map_err(|e| {
+                ReplayError::ExecutorError {
+                    err: format!("{:?}", e),
+                }
+            })?;
 
         let registry = prometheus::Registry::new();
         let metrics = Arc::new(LimitsMetrics::new(&registry));
@@ -109,14 +110,17 @@ impl ReplayExecutor {
 
 struct ReplayStore<'a> {
     env: &'a ReplayEnvironment,
-    epoch: u64
+    epoch: u64,
 }
 
 impl BackingPackageStore for ReplayStore<'_> {
     fn get_package_object(&self, package_id: &ObjectID) -> SuiResult<Option<PackageObject>> {
         info!("Getting package object for {:?}", package_id);
         if is_framework_package(package_id) {
-            let (pkg, txn_digest) = self.env.get_system_package_at_epoch(package_id, self.epoch).unwrap();
+            let (pkg, txn_digest) = self
+                .env
+                .get_system_package_at_epoch(package_id, self.epoch)
+                .unwrap();
             let package = PackageObject::new(Object::new_from_package(pkg, txn_digest));
             Ok(Some(package))
         } else {
@@ -124,8 +128,7 @@ impl BackingPackageStore for ReplayStore<'_> {
                 .env
                 .package_objects
                 .get(package_id)
-                .map(|obj| PackageObject::new(obj.clone()))
-            )
+                .map(|obj| PackageObject::new(obj.clone())))
         }
     }
 }
@@ -138,8 +141,8 @@ impl ChildObjectResolver for ReplayStore<'_> {
         child_version_upper_bound: SequenceNumber,
     ) -> SuiResult<Option<Object>> {
         todo!(
-            "ChildObjectResolver::read_child_object {:?} -> {:?} at {:?}", 
-            parent, 
+            "ChildObjectResolver::read_child_object {:?} -> {:?} at {:?}",
+            parent,
             child,
             child_version_upper_bound,
         )
@@ -151,6 +154,7 @@ impl ChildObjectResolver for ReplayStore<'_> {
         receiving_object_id: &ObjectID,
         receive_object_at_version: SequenceNumber,
         epoch_id: EpochId,
+        use_object_per_epoch_marker_table_v2: bool,
     ) -> SuiResult<Option<Object>> {
         todo!(
             "ChildObjectResolver::get_object_received_at_version owner: {:?}, receiving_object_id: {:?}, receive_object_at_version: {:?}, epoch_id: {:?}",
@@ -174,7 +178,11 @@ impl ParentSync for ReplayStore<'_> {
 impl ResourceResolver for ReplayStore<'_> {
     type Error = ReplayError;
 
-    fn get_resource(&self, _address: &AccountAddress, _typ: &StructTag) -> Result<Option<Vec<u8>>, Self::Error> {
+    fn get_resource(
+        &self,
+        _address: &AccountAddress,
+        _typ: &StructTag,
+    ) -> Result<Option<Vec<u8>>, Self::Error> {
         todo!("ResourceResolver::get_resource")
     }
 }
@@ -192,11 +200,11 @@ impl ObjectStore for ReplayStore<'_> {
         todo!("ObjectStore::get_object {:?}", object_id)
     }
 
-    fn get_object_by_key(
-        &self, 
-        object_id: &ObjectID, 
-        version: VersionNumber,
-    ) -> Option<Object> {
-        todo!("ObjectStore::get_object {:?} at {}", object_id, version.value())
+    fn get_object_by_key(&self, object_id: &ObjectID, version: VersionNumber) -> Option<Object> {
+        todo!(
+            "ObjectStore::get_object {:?} at {}",
+            object_id,
+            version.value()
+        )
     }
 }
