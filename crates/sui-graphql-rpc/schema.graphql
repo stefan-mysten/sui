@@ -2879,7 +2879,7 @@ objects are ones whose
 
 - Type matches the `type` filter,
 - AND, whose owner matches the `owner` filter,
-- AND, whose ID is in `objectIds` OR whose ID and version is in `objectKeys`.
+- AND, whose ID is in `objectIds`.
 """
 input ObjectFilter {
 	"""

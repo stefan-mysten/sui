@@ -70,7 +70,14 @@ impl GasInput {
         // still be viewable.
         let page = Page::from_params(ctx.data_unchecked(), first, after, last, before)?;
 
+        let object_ids = self
+            .payment_obj_keys
+            .iter()
+            .map(|k| (k.object_id))
+            .collect::<Vec<_>>();
+
         let filter = ObjectFilter {
+            object_ids: Some(object_ids),
             ..Default::default()
         };
 

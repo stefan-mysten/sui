@@ -1605,58 +1605,17 @@ pub(crate) async fn deserialize_move_struct(
 fn objects_query(filter: &ObjectFilter, range: AvailableRange, page: &Page<Cursor>) -> RawQuery
 where
 {
-    if let Some(_) = &filter.object_ids {
-        // If both object IDs and object keys are specified, then we need to query in
-        // both historical and consistent views, and then union the results.
-        let ids_only_filter = ObjectFilter { ..filter.clone() };
-        let (id_query, id_bindings) = build_objects_query(
-            View::Consistent,
-            range,
-            page,
-            move |query| ids_only_filter.apply(query),
-            move |newer| newer,
-        )
-        .finish();
-
-        let keys_only_filter = ObjectFilter {
-            object_ids: None,
-            ..filter.clone()
-        };
-        let (key_query, key_bindings) = build_objects_query(
-            View::Historical,
-            range,
-            page,
-            move |query| keys_only_filter.apply(query),
-            move |newer| newer,
-        )
-        .finish();
-
-        RawQuery::new(
-            format!(
-                "SELECT * FROM (({id_query}) UNION ALL ({key_query})) AS candidates",
-                id_query = id_query,
-                key_query = key_query,
-            ),
-            id_bindings.into_iter().chain(key_bindings).collect(),
-        )
-        .order_by("object_id")
-        .limit(page.limit() as i64)
-    } else {
-        // Only one of object IDs or object keys is specified, or neither are specified.
-        let view = if !filter.has_filters() {
+    build_objects_query(
+        if !filter.has_filters() {
             View::Historical
         } else {
             View::Consistent
-        };
-
-        build_objects_query(
-            view,
-            range,
-            page,
-            move |query| filter.apply(query),
-            move |newer| newer,
-        )
-    }
+        },
+        range,
+        page,
+        move |query| filter.apply(query),
+        move |newer| newer,
+    )
 }
 
 #[cfg(test)]
@@ -1735,7 +1694,13 @@ mod tests {
         );
 
         // No overlap
-        assert_eq!(f0.clone().intersect(f3.clone()), None);
-        assert_eq!(f2.clone().intersect(f3.clone()), None);
+        assert_eq!(
+            f0.clone().intersect(f3.clone()),
+            Some(ObjectFilter::default())
+        );
+        assert_eq!(
+            f2.clone().intersect(f3.clone()),
+            Some(ObjectFilter::default())
+        );
     }
 }
