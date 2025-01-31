@@ -71,7 +71,6 @@ impl GasInput {
         let page = Page::from_params(ctx.data_unchecked(), first, after, last, before)?;
 
         let filter = ObjectFilter {
-            object_keys: Some(self.payment_obj_keys.clone()),
             ..Default::default()
         };
 

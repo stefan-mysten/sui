@@ -114,7 +114,7 @@ pub(crate) struct ObjectRef {
 ///
 /// - Type matches the `type` filter,
 /// - AND, whose owner matches the `owner` filter,
-/// - AND, whose ID is in `objectIds` OR whose ID and version is in `objectKeys`.
+/// - AND, whose ID is in `objectIds`.
 #[derive(InputObject, Default, Debug, Clone, Eq, PartialEq)]
 pub(crate) struct ObjectFilter {
     /// Filter objects by their type's `package`, `package::module`, or their fully qualified type
@@ -129,11 +129,6 @@ pub(crate) struct ObjectFilter {
 
     /// Filter for live objects by their IDs.
     pub object_ids: Option<Vec<SuiAddress>>,
-
-    /// Filter for live objects by their ID and version. NOTE:  this input filter has been
-    /// deprecated in favor of `multiGetObjects` query as it does not make sense to query for live
-    /// objects by their versions. This filter will be removed with v1.42.0 release.
-    pub object_keys: Option<Vec<ObjectKey>>,
 }
 
 #[derive(InputObject, Debug, Clone, Eq, PartialEq)]
@@ -1082,77 +1077,23 @@ impl ObjectFilter {
             };
         }
 
-        // Treat `object_ids` and `object_keys` as a single filter on IDs, and optionally versions,
-        // and compute the intersection of that.
-        let keys = intersect::field(self.keys(), other.keys(), |k, l| {
-            let mut combined = BTreeMap::new();
-
-            for (id, v) in k {
-                if let Some(w) = l.get(&id).copied() {
-                    combined.insert(id, intersect::field(v, w, intersect::by_eq)?);
-                }
-            }
-
-            // If the intersection is empty, it means, there were some ID or Key filters in both
-            // `self` and `other`, but they don't overlap, so the final result is inconsistent.
-            (!combined.is_empty()).then_some(combined)
-        })?;
-
-        // Extract the ID and Key filters back out. At this point, we know that if there were ID/Key
-        // filters in both `self` and `other`, then they intersected to form a consistent set of
-        // constraints, so it is safe to interpret the lack of any ID/Key filters respectively as a
-        // lack of that kind of constraint, rather than a constraint on the empty set.
-
         let object_ids = {
-            let partition: Vec<_> = keys
-                .iter()
-                .flatten()
-                .filter_map(|(id, v)| v.is_none().then_some(*id))
-                .collect();
+            if let (Some(obj_ids), Some(other_obj_ids)) = (&self.object_ids, &other.object_ids) {
+                let set_a: BTreeSet<_> = obj_ids.iter().cloned().collect();
+                let set_b: BTreeSet<_> = other_obj_ids.iter().cloned().collect();
+                let intersection: Vec<_> = set_a.intersection(&set_b).cloned().collect();
 
-            (!partition.is_empty()).then_some(partition)
-        };
-
-        let object_keys = {
-            let partition: Vec<_> = keys
-                .iter()
-                .flatten()
-                .filter_map(|(id, v)| {
-                    Some(ObjectKey {
-                        object_id: *id,
-                        version: (*v)?.into(),
-                    })
-                })
-                .collect();
-
-            (!partition.is_empty()).then_some(partition)
+                Some(intersection)
+            } else {
+                None
+            }
         };
 
         Some(Self {
             type_: intersect!(type_, TypeFilter::intersect)?,
             owner: intersect!(owner, intersect::by_eq)?,
             object_ids,
-            object_keys,
         })
-    }
-
-    /// Extract the Object ID and Key filters into one combined map from Object IDs in this filter,
-    /// to the versions they should have (or None if the filter mentions the ID but no version for
-    /// it).
-    fn keys(&self) -> Option<BTreeMap<SuiAddress, Option<u64>>> {
-        if self.object_keys.is_none() && self.object_ids.is_none() {
-            return None;
-        }
-
-        Some(BTreeMap::from_iter(
-            self.object_keys
-                .iter()
-                .flatten()
-                .map(|key| (key.object_id, Some(key.version.into())))
-                // Chain ID filters after Key filters so if there is overlap, we overwrite the key
-                // filter with the ID filter.
-                .chain(self.object_ids.iter().flatten().map(|id| (*id, None))),
-        ))
     }
 
     /// Applies ObjectFilter to the input `RawQuery` and returns a new `RawQuery`.
@@ -1175,29 +1116,6 @@ impl ObjectFilter {
                     )
                     .unwrap();
                     prefix = ", ";
-                }
-                inner.push(')');
-                query = or_filter!(query, inner);
-            }
-        }
-
-        if let Some(object_keys) = &self.object_keys {
-            // Maximally strict - match a vec of 0 elements
-            if object_keys.is_empty() {
-                query = or_filter!(query, "1=0");
-            } else {
-                let mut inner = String::new();
-                let mut prefix = "(";
-                for ObjectKey { object_id, version } in object_keys {
-                    // SAFETY: Writing to a `String` cannot fail.
-                    write!(
-                        &mut inner,
-                        "{prefix}(object_id = '\\x{}'::bytea AND object_version = {})",
-                        hex::encode(object_id.into_vec()),
-                        version
-                    )
-                    .unwrap();
-                    prefix = " OR ";
                 }
                 inner.push(')');
                 query = or_filter!(query, inner);
@@ -1682,18 +1600,15 @@ pub(crate) async fn deserialize_move_struct(
 }
 
 /// Constructs a raw query to fetch objects from the database. Objects are filtered out if they
-/// satisfy the criteria but have a later version in the same checkpoint. If object keys are
-/// provided, or no filters are specified at all, then this final condition is not applied.
+/// satisfy the criteria but have a later version in the same checkpoint. If no filters are
+/// specified at all, then this final condition is not applied.
 fn objects_query(filter: &ObjectFilter, range: AvailableRange, page: &Page<Cursor>) -> RawQuery
 where
 {
-    if let (Some(_), Some(_)) = (&filter.object_ids, &filter.object_keys) {
+    if let Some(_) = &filter.object_ids {
         // If both object IDs and object keys are specified, then we need to query in
         // both historical and consistent views, and then union the results.
-        let ids_only_filter = ObjectFilter {
-            object_keys: None,
-            ..filter.clone()
-        };
+        let ids_only_filter = ObjectFilter { ..filter.clone() };
         let (id_query, id_bindings) = build_objects_query(
             View::Consistent,
             range,
@@ -1728,7 +1643,7 @@ where
         .limit(page.limit() as i64)
     } else {
         // Only one of object IDs or object keys is specified, or neither are specified.
-        let view = if filter.object_keys.is_some() || !filter.has_filters() {
+        let view = if !filter.has_filters() {
             View::Historical
         } else {
             View::Consistent
@@ -1770,29 +1685,14 @@ mod tests {
         let i1 = SuiAddress::from_str("0x1").unwrap();
         let i2 = SuiAddress::from_str("0x2").unwrap();
         let i3 = SuiAddress::from_str("0x3").unwrap();
-        let i4 = SuiAddress::from_str("0x4").unwrap();
 
         let f0 = ObjectFilter {
             object_ids: Some(vec![i1, i3]),
-            object_keys: Some(vec![
-                ObjectKey {
-                    object_id: i2,
-                    version: 1.into(),
-                },
-                ObjectKey {
-                    object_id: i4,
-                    version: 2.into(),
-                },
-            ]),
             ..Default::default()
         };
 
         let f1 = ObjectFilter {
             object_ids: Some(vec![i1, i2]),
-            object_keys: Some(vec![ObjectKey {
-                object_id: i4,
-                version: 2.into(),
-            }]),
             ..Default::default()
         };
 
@@ -1802,16 +1702,6 @@ mod tests {
         };
 
         let f3 = ObjectFilter {
-            object_keys: Some(vec![
-                ObjectKey {
-                    object_id: i2,
-                    version: 2.into(),
-                },
-                ObjectKey {
-                    object_id: i4,
-                    version: 2.into(),
-                },
-            ]),
             ..Default::default()
         };
 
@@ -1819,16 +1709,6 @@ mod tests {
             f0.clone().intersect(f1.clone()),
             Some(ObjectFilter {
                 object_ids: Some(vec![i1]),
-                object_keys: Some(vec![
-                    ObjectKey {
-                        object_id: i2,
-                        version: 1.into(),
-                    },
-                    ObjectKey {
-                        object_id: i4,
-                        version: 2.into(),
-                    },
-                ]),
                 ..Default::default()
             })
         );
@@ -1843,25 +1723,19 @@ mod tests {
 
         assert_eq!(
             f1.clone().intersect(f3.clone()),
+            Some(ObjectFilter::default())
+        );
+
+        assert_eq!(
+            f0.clone().intersect(f2.clone()),
             Some(ObjectFilter {
-                object_keys: Some(vec![
-                    ObjectKey {
-                        object_id: i2,
-                        version: 2.into(),
-                    },
-                    ObjectKey {
-                        object_id: i4,
-                        version: 2.into(),
-                    },
-                ]),
+                object_ids: Some(vec![i1, i3]),
                 ..Default::default()
             })
         );
 
-        // i2 got a conflicting version assignment
+        // No overlap
         assert_eq!(f0.clone().intersect(f3.clone()), None);
-
-        // No overlap between these two.
         assert_eq!(f2.clone().intersect(f3.clone()), None);
     }
 }
