@@ -175,12 +175,11 @@ module Test::M1 {
       }
     }
   }
-  objects_a: objects(filter: {objectKeys: [
+  objects_a: multiGetObjects(keys: [
     {objectId: "@{obj_2_499}", version: 2},
     {objectId: "@{obj_2_498}", version: 2},
     {objectId: "@{obj_2_497}", version: 2},
-    ]}) {
-    nodes {
+    ]) {
       asMoveObject {
         owner {
           ... on AddressOwner {
@@ -197,13 +196,11 @@ module Test::M1 {
         }
       }
     }
-  }
-  objects_b: objects(filter: {objectKeys: [
+  objects_b: multiGetObjects(keys: [
     {objectId: "@{obj_2_499}", version: 3},
     {objectId: "@{obj_2_498}", version: 4},
     {objectId: "@{obj_2_497}", version: 5},
-    ]}) {
-    nodes {
+    ]) {
       asMoveObject {
         owner {
           ... on AddressOwner {
@@ -220,7 +217,6 @@ module Test::M1 {
         }
       }
     }
-  }
   owned_by_b: address(address: "@{B}") {
     objects {
       nodes {
