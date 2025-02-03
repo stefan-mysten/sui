@@ -171,34 +171,6 @@ Response: {
   "data": {
     "objects_at_version": [
       {
-        "version": 3,
-        "asMoveObject": {
-          "contents": {
-            "type": {
-              "repr": "0xf8ecbba416b85769db9b3425d240e9e350c2994bc68d944ac19ebecffb7e0c60::M1::Object"
-            },
-            "json": {
-              "id": "0xc4e6c824c72af97ed831b666173a96111e573e0162b205b51c23ae242757e8d2",
-              "value": "0"
-            }
-          }
-        }
-      },
-      {
-        "version": 4,
-        "asMoveObject": {
-          "contents": {
-            "type": {
-              "repr": "0xf8ecbba416b85769db9b3425d240e9e350c2994bc68d944ac19ebecffb7e0c60::M1::Object"
-            },
-            "json": {
-              "id": "0x0f2ff2731e04cef60e75403b02f31721406c99cb05eb3029f697de89a3d70a71",
-              "value": "1"
-            }
-          }
-        }
-      },
-      {
         "version": 6,
         "asMoveObject": {
           "contents": {
@@ -222,6 +194,34 @@ Response: {
             "json": {
               "id": "0xd0a70e7cf1fa823e6bf035f878cc33ee3d221d7f956da78e572bb52574482471",
               "value": "2"
+            }
+          }
+        }
+      },
+      {
+        "version": 4,
+        "asMoveObject": {
+          "contents": {
+            "type": {
+              "repr": "0xf8ecbba416b85769db9b3425d240e9e350c2994bc68d944ac19ebecffb7e0c60::M1::Object"
+            },
+            "json": {
+              "id": "0x0f2ff2731e04cef60e75403b02f31721406c99cb05eb3029f697de89a3d70a71",
+              "value": "1"
+            }
+          }
+        }
+      },
+      {
+        "version": 3,
+        "asMoveObject": {
+          "contents": {
+            "type": {
+              "repr": "0xf8ecbba416b85769db9b3425d240e9e350c2994bc68d944ac19ebecffb7e0c60::M1::Object"
+            },
+            "json": {
+              "id": "0xc4e6c824c72af97ed831b666173a96111e573e0162b205b51c23ae242757e8d2",
+              "value": "0"
             }
           }
         }
@@ -614,15 +614,15 @@ Response: {
   "data": {
     "objects_at_version": [
       {
-        "version": 4,
+        "version": 3,
         "asMoveObject": {
           "contents": {
             "type": {
               "repr": "0xf8ecbba416b85769db9b3425d240e9e350c2994bc68d944ac19ebecffb7e0c60::M1::Object"
             },
             "json": {
-              "id": "0x0f2ff2731e04cef60e75403b02f31721406c99cb05eb3029f697de89a3d70a71",
-              "value": "1"
+              "id": "0xc4e6c824c72af97ed831b666173a96111e573e0162b205b51c23ae242757e8d2",
+              "value": "0"
             }
           }
         }
@@ -642,15 +642,15 @@ Response: {
         }
       },
       {
-        "version": 3,
+        "version": 4,
         "asMoveObject": {
           "contents": {
             "type": {
               "repr": "0xf8ecbba416b85769db9b3425d240e9e350c2994bc68d944ac19ebecffb7e0c60::M1::Object"
             },
             "json": {
-              "id": "0xc4e6c824c72af97ed831b666173a96111e573e0162b205b51c23ae242757e8d2",
-              "value": "0"
+              "id": "0x0f2ff2731e04cef60e75403b02f31721406c99cb05eb3029f697de89a3d70a71",
+              "value": "1"
             }
           }
         }
