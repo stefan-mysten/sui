@@ -327,8 +327,8 @@ Response: {
           },
           "contents": {
             "json": {
-              "id": "0xff7f5ef9e5a7b5b6265b414ddc0f76a1daa5677e6333d10c280223d036a7038f",
-              "value": "6"
+              "id": "0xfffc711287a6c859f0855d276c5439941b0a916bcdb4f31a62547bf94b073682",
+              "value": "107"
             },
             "type": {
               "repr": "0x361adca72b31788356405445166ccc9c01ab86b80ab7a28fc7aff4da14b0bbb7::M1::Object"
@@ -345,8 +345,8 @@ Response: {
           },
           "contents": {
             "json": {
-              "id": "0xfffc711287a6c859f0855d276c5439941b0a916bcdb4f31a62547bf94b073682",
-              "value": "107"
+              "id": "0xff7f5ef9e5a7b5b6265b414ddc0f76a1daa5677e6333d10c280223d036a7038f",
+              "value": "6"
             },
             "type": {
               "repr": "0x361adca72b31788356405445166ccc9c01ab86b80ab7a28fc7aff4da14b0bbb7::M1::Object"
@@ -383,24 +383,6 @@ Response: {
           },
           "contents": {
             "json": {
-              "id": "0xfef205520684c9953fac1dee89681b03fc8cd19d8574f660202972b95bb7a5a8",
-              "value": "275"
-            },
-            "type": {
-              "repr": "0x361adca72b31788356405445166ccc9c01ab86b80ab7a28fc7aff4da14b0bbb7::M1::Object"
-            }
-          }
-        }
-      },
-      {
-        "asMoveObject": {
-          "owner": {
-            "owner": {
-              "address": "0xa7b032703878aa74c3126935789fd1d4d7e111d5911b09247d6963061c312b5a"
-            }
-          },
-          "contents": {
-            "json": {
               "id": "0xfffc711287a6c859f0855d276c5439941b0a916bcdb4f31a62547bf94b073682",
               "value": "107"
             },
@@ -421,6 +403,24 @@ Response: {
             "json": {
               "id": "0xff7f5ef9e5a7b5b6265b414ddc0f76a1daa5677e6333d10c280223d036a7038f",
               "value": "6"
+            },
+            "type": {
+              "repr": "0x361adca72b31788356405445166ccc9c01ab86b80ab7a28fc7aff4da14b0bbb7::M1::Object"
+            }
+          }
+        }
+      },
+      {
+        "asMoveObject": {
+          "owner": {
+            "owner": {
+              "address": "0xa7b032703878aa74c3126935789fd1d4d7e111d5911b09247d6963061c312b5a"
+            }
+          },
+          "contents": {
+            "json": {
+              "id": "0xfef205520684c9953fac1dee89681b03fc8cd19d8574f660202972b95bb7a5a8",
+              "value": "275"
             },
             "type": {
               "repr": "0x361adca72b31788356405445166ccc9c01ab86b80ab7a28fc7aff4da14b0bbb7::M1::Object"
