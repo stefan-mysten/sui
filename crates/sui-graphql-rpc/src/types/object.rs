@@ -815,8 +815,8 @@ impl Object {
             })
             .collect();
 
-        let data = loader.load_many(keys).await?;
-        let objects: Vec<_> = data
+        let data = loader.load_many(keys.clone()).await?;
+        let mut objects: Vec<_> = data
             .into_iter()
             .filter_map(|(lookup_key, bcs)| {
                 Object::new_serialized(
@@ -828,6 +828,19 @@ impl Object {
                 )
             })
             .collect();
+
+        // Sort objects based on the original input keys order
+        objects.sort_by(|a, b| {
+            let a_index = keys
+                .iter()
+                .position(|k| k.id == a.address && k.version == a.version)
+                .unwrap_or(usize::MAX);
+            let b_index = keys
+                .iter()
+                .position(|k| k.id == b.address && k.version == b.version)
+                .unwrap_or(usize::MAX);
+            a_index.cmp(&b_index)
+        });
 
         Ok(objects)
     }
