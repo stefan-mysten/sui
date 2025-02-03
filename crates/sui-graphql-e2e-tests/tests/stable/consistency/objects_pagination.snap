@@ -171,34 +171,6 @@ Response: {
   "data": {
     "objects_at_version": [
       {
-        "version": 4,
-        "asMoveObject": {
-          "contents": {
-            "type": {
-              "repr": "0xf8ecbba416b85769db9b3425d240e9e350c2994bc68d944ac19ebecffb7e0c60::M1::Object"
-            },
-            "json": {
-              "id": "0x0f2ff2731e04cef60e75403b02f31721406c99cb05eb3029f697de89a3d70a71",
-              "value": "1"
-            }
-          }
-        }
-      },
-      {
-        "version": 5,
-        "asMoveObject": {
-          "contents": {
-            "type": {
-              "repr": "0xf8ecbba416b85769db9b3425d240e9e350c2994bc68d944ac19ebecffb7e0c60::M1::Object"
-            },
-            "json": {
-              "id": "0xd0a70e7cf1fa823e6bf035f878cc33ee3d221d7f956da78e572bb52574482471",
-              "value": "2"
-            }
-          }
-        }
-      },
-      {
         "version": 3,
         "asMoveObject": {
           "contents": {
@@ -213,6 +185,20 @@ Response: {
         }
       },
       {
+        "version": 4,
+        "asMoveObject": {
+          "contents": {
+            "type": {
+              "repr": "0xf8ecbba416b85769db9b3425d240e9e350c2994bc68d944ac19ebecffb7e0c60::M1::Object"
+            },
+            "json": {
+              "id": "0x0f2ff2731e04cef60e75403b02f31721406c99cb05eb3029f697de89a3d70a71",
+              "value": "1"
+            }
+          }
+        }
+      },
+      {
         "version": 6,
         "asMoveObject": {
           "contents": {
@@ -222,6 +208,20 @@ Response: {
             "json": {
               "id": "0x44864f8c6cad831f338516aa3ebeacf00c60a13fb4a5a4200b35f376af227cf3",
               "value": "3"
+            }
+          }
+        }
+      },
+      {
+        "version": 5,
+        "asMoveObject": {
+          "contents": {
+            "type": {
+              "repr": "0xf8ecbba416b85769db9b3425d240e9e350c2994bc68d944ac19ebecffb7e0c60::M1::Object"
+            },
+            "json": {
+              "id": "0xd0a70e7cf1fa823e6bf035f878cc33ee3d221d7f956da78e572bb52574482471",
+              "value": "2"
             }
           }
         }
@@ -628,15 +628,15 @@ Response: {
         }
       },
       {
-        "version": 5,
+        "version": 6,
         "asMoveObject": {
           "contents": {
             "type": {
               "repr": "0xf8ecbba416b85769db9b3425d240e9e350c2994bc68d944ac19ebecffb7e0c60::M1::Object"
             },
             "json": {
-              "id": "0xd0a70e7cf1fa823e6bf035f878cc33ee3d221d7f956da78e572bb52574482471",
-              "value": "2"
+              "id": "0x44864f8c6cad831f338516aa3ebeacf00c60a13fb4a5a4200b35f376af227cf3",
+              "value": "3"
             }
           }
         }
@@ -656,15 +656,15 @@ Response: {
         }
       },
       {
-        "version": 6,
+        "version": 5,
         "asMoveObject": {
           "contents": {
             "type": {
               "repr": "0xf8ecbba416b85769db9b3425d240e9e350c2994bc68d944ac19ebecffb7e0c60::M1::Object"
             },
             "json": {
-              "id": "0x44864f8c6cad831f338516aa3ebeacf00c60a13fb4a5a4200b35f376af227cf3",
-              "value": "3"
+              "id": "0xd0a70e7cf1fa823e6bf035f878cc33ee3d221d7f956da78e572bb52574482471",
+              "value": "2"
             }
           }
         }
