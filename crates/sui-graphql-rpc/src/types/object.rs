@@ -807,15 +807,21 @@ impl Object {
     ) -> Result<Vec<Self>, Error> {
         let DataLoader(loader) = &ctx.data_unchecked();
 
-        let keys: Vec<PointLookupKey> = keys
-            .into_iter()
-            .map(|key| PointLookupKey {
-                id: key.object_id,
-                version: key.version.into(),
+        // Keep track of input keys' indices to ensure same output object order
+        let mut keys_map: BTreeMap<(SuiAddress, u64), usize> = BTreeMap::new();
+        let keys: Vec<_> = keys
+            .iter()
+            .enumerate()
+            .map(|(index, key)| {
+                keys_map.insert((key.object_id, key.version.into()), index);
+                PointLookupKey {
+                    id: key.object_id,
+                    version: key.version.into(),
+                }
             })
             .collect();
 
-        let data = loader.load_many(keys.clone()).await?;
+        let data = loader.load_many(keys).await?;
         let mut objects: Vec<_> = data
             .into_iter()
             .filter_map(|(lookup_key, bcs)| {
@@ -830,16 +836,11 @@ impl Object {
             .collect();
 
         // Sort objects based on the original input keys order
-        objects.sort_by(|a, b| {
-            let a_index = keys
-                .iter()
-                .position(|k| k.id == a.address && k.version == a.version)
-                .unwrap_or(usize::MAX);
-            let b_index = keys
-                .iter()
-                .position(|k| k.id == b.address && k.version == b.version)
-                .unwrap_or(usize::MAX);
-            a_index.cmp(&b_index)
+        objects.sort_by_key(|obj| {
+            keys_map
+                .get(&(obj.address, obj.version))
+                .cloned()
+                .unwrap_or(usize::MAX)
         });
 
         Ok(objects)
