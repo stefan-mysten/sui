@@ -70,11 +70,15 @@ impl GasInput {
         // still be viewable.
         let page = Page::from_params(ctx.data_unchecked(), first, after, last, before)?;
 
-        let object_ids = self
-            .payment_obj_keys
-            .iter()
-            .map(|k| (k.object_id))
-            .collect::<Vec<_>>();
+        let object_ids: Vec<SuiAddress> = Object::query_many(
+            ctx,
+            self.payment_obj_keys.clone(),
+            self.checkpoint_viewed_at,
+        )
+        .await?
+        .into_iter()
+        .map(|o| o.address)
+        .collect();
 
         let filter = ObjectFilter {
             object_ids: Some(object_ids),
