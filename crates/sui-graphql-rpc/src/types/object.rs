@@ -1074,14 +1074,23 @@ impl ObjectFilter {
         }
 
         let object_ids = {
-            if let (Some(obj_ids), Some(other_obj_ids)) = (&self.object_ids, &other.object_ids) {
-                let set_a: BTreeSet<_> = obj_ids.iter().cloned().collect();
-                let set_b: BTreeSet<_> = other_obj_ids.iter().cloned().collect();
-                let intersection: Vec<_> = set_a.intersection(&set_b).cloned().collect();
+            match (self.object_ids, other.object_ids) {
+                (Some(obj_ids), Some(other_obj_ids)) => {
+                    let set_a: BTreeSet<_> = obj_ids.iter().cloned().collect();
+                    let set_b: BTreeSet<_> = other_obj_ids.iter().cloned().collect();
+                    let intersection: Vec<_> = set_a.intersection(&set_b).cloned().collect();
 
-                Some(intersection)
-            } else {
-                None
+                    if intersection.is_empty() {
+                        return None;
+                    }
+
+                    Some(intersection)
+                }
+                (Some(obj_ids), None) => intersect::field(Some(obj_ids), None, intersect::by_eq)?,
+                (None, Some(other_obj_ids)) => {
+                    intersect::field(Some(other_obj_ids), None, intersect::by_eq)?
+                }
+                _ => None,
             }
         };
 
