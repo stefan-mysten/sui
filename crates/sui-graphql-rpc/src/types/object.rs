@@ -824,7 +824,7 @@ impl Object {
                     Object::new_serialized(k.id, k.version, bcs, checkpoint_viewed_at, k.version)
                 })
             })
-            .filter_map(|obj| obj)
+            .flatten()
             .collect())
     }
 
@@ -1668,7 +1668,7 @@ mod tests {
         let f3 = ObjectFilter {
             ..Default::default()
         };
-    
+
         let f4 = ObjectFilter {
             object_ids: Some(vec![i3]),
             ..Default::default()
@@ -1690,10 +1690,7 @@ mod tests {
             })
         );
 
-        assert_eq!(
-            f1.clone().intersect(f3.clone()),
-            Some(f1.clone())
-        );
+        assert_eq!(f1.clone().intersect(f3.clone()), Some(f1.clone()));
 
         assert_eq!(
             f0.clone().intersect(f2.clone()),
@@ -1703,12 +1700,11 @@ mod tests {
             })
         );
 
-        assert_eq!(f3.clone().intersect(f3.clone()),
+        assert_eq!(
+            f3.clone().intersect(f3.clone()),
             Some(ObjectFilter::default())
         );
 
-        assert_eq!(f1.clone().intersect(f4.clone()),
-            None
-        );
+        assert_eq!(f1.clone().intersect(f4.clone()), None);
     }
 }
