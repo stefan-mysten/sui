@@ -4,8 +4,7 @@ These packages are part of the tree shaking algorithm tests
 Edge cases
 - if a package was published before the tree shaking change, it will have in the linkage table all the 
 packages that it depends on, even if code from that packages are not referenced in the code
-- in this case, we need to fetch all the linkage table of all packages that are dependencies in the package.
-
+- in this case, we need to ensure that all trans deps of immediate used packages are considered accordingly.
 
 
 Tests projects are established as following
