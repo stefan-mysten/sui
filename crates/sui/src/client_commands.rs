@@ -75,7 +75,7 @@ use sui_types::{
     gas_coin::GasCoin,
     message_envelope::Envelope,
     metrics::BytecodeVerifierMetrics,
-    move_package::UpgradeCap,
+    move_package::{MovePackage, UpgradeCap},
     object::Owner,
     parse_sui_type_tag,
     signature::GenericSignature,
@@ -937,7 +937,7 @@ impl SuiClientCommands {
                     check_dep_verification_flags(skip_dependency_verification, verify_deps)?;
 
                 let upgrade_result = upgrade_package(
-                    client.read_api(),
+                    &client,
                     build_config.clone(),
                     &package_path,
                     upgrade_capability,
@@ -1066,7 +1066,7 @@ impl SuiClientCommands {
                     check_dep_verification_flags(skip_dependency_verification, verify_deps)?;
 
                 let compile_result = compile_package(
-                    client.read_api(),
+                    &client,
                     build_config.clone(),
                     &package_path,
                     with_unpublished_dependencies,
@@ -1124,6 +1124,7 @@ impl SuiClientCommands {
                 package_path,
                 build_config,
             } => {
+                let client = context.get_client().await?;
                 let protocol_version =
                     protocol_version.map_or(ProtocolVersion::MAX, ProtocolVersion::new);
                 let protocol_config =
@@ -1151,7 +1152,9 @@ impl SuiClientCommands {
 
                     (_, package_path) => {
                         let package_path = package_path.unwrap_or_else(|| PathBuf::from("."));
-                        let package = compile_package_simple(build_config, &package_path, None)?;
+                        let package =
+                            compile_package_simple(&client, build_config, &package_path, None)
+                                .await?;
                         let name = package
                             .package
                             .compiled_package_info
@@ -1767,6 +1770,7 @@ fn check_dep_verification_flags(
 }
 
 fn compile_package_simple(
+    client: &SuiClient,
     mut build_config: MoveBuildConfig,
     package_path: &Path,
     chain_id: Option<String>,
@@ -1781,13 +1785,13 @@ fn compile_package_simple(
     let resolution_graph = config.resolution_graph(package_path, chain_id.clone())?;
     let mut compiled_package =
         build_from_resolution_graph(resolution_graph, false, false, chain_id)?;
-    compiled_package.tree_shake(false)?;
+    pkg_tree_shake(client, false, &mut compiled_package).await?;
 
     Ok(compiled_package)
 }
 
 pub(crate) async fn upgrade_package(
-    read_api: &ReadApi,
+    client: &SuiClient,
     build_config: MoveBuildConfig,
     package_path: &Path,
     upgrade_capability: ObjectID,
@@ -1796,14 +1800,15 @@ pub(crate) async fn upgrade_package(
     env_alias: Option<String>,
 ) -> Result<(u8, CompiledPackage), anyhow::Error> {
     let mut compiled_package = compile_package(
-        read_api,
+        client,
         build_config,
         package_path,
         with_unpublished_dependencies,
         skip_dependency_verification,
     )
     .await?;
-    compiled_package.tree_shake(with_unpublished_dependencies)?;
+
+    pkg_tree_shake(client, with_unpublished_dependencies, &mut compiled_package).await?;
 
     compiled_package.published_at.as_ref().map_err(|e| match e {
         PublishedAtError::NotPresent => {
@@ -1831,7 +1836,8 @@ pub(crate) async fn upgrade_package(
         }
     })?;
 
-    let resp = read_api
+    let resp = client
+        .read_api()
         .get_object_with_options(
             upgrade_capability,
             SuiObjectDataOptions::default().with_bcs().with_owner(),
@@ -1859,7 +1865,7 @@ pub(crate) async fn upgrade_package(
 }
 
 pub(crate) async fn compile_package(
-    read_api: &ReadApi,
+    client: &SuiClient,
     mut build_config: MoveBuildConfig,
     package_path: &Path,
     with_unpublished_dependencies: bool,
@@ -1870,6 +1876,7 @@ pub(crate) async fn compile_package(
 
     build_config.implicit_dependencies = implicit_deps_for_protocol_version(protocol_version)?;
 
+    let read_api = client.read_api();
     let config = resolve_lock_file_path(build_config, Some(package_path))?;
     let run_bytecode_verifier = true;
     let print_diags_to_stderr = true;
@@ -1892,7 +1899,9 @@ pub(crate) async fn compile_package(
         print_diags_to_stderr,
         chain_id,
     )?;
-    compiled_package.tree_shake(with_unpublished_dependencies)?;
+
+    pkg_tree_shake(client, with_unpublished_dependencies, &mut compiled_package).await?;
+
     let protocol_config = read_api.get_protocol_config(None).await?;
 
     // Check that the package's Move version is compatible with the chain's
@@ -3120,6 +3129,69 @@ async fn check_protocol_version_and_warn(client: &SuiClient) -> Result<(), anyho
             .bold()
         );
     }
+
+    Ok(())
+}
+
+/// Fetch move packages based on the provided package IDs.
+async fn fetch_move_packages(
+    client: &SuiClient,
+    package_ids: &[ObjectID],
+) -> Result<Vec<MovePackage>, anyhow::Error> {
+    let objects = client
+        .read_api()
+        .multi_get_object_with_options(package_ids.to_vec(), SuiObjectDataOptions::bcs_lossless())
+        .await
+        .map_err(|e| anyhow!("{e}"))?;
+
+    objects
+        .into_iter()
+        .map(|o| {
+            let o = o.into_object().map_err(|e| anyhow!("{e}"))?;
+            let Some(SuiRawData::Package(p)) = o.bcs else {
+                bail!("Expected SuiRawData::Package but got something else");
+            };
+            p.to_move_package(u64::MAX /* safe as this pkg comes from the network */)
+                .map_err(|e| anyhow!("{e}"))
+        })
+        .collect()
+}
+
+/// Filter out a package's dependencies which are not referenced in the source code.
+pub(crate) async fn pkg_tree_shake(
+    client: &SuiClient,
+    with_unpublished_dependencies: bool,
+    compiled_package: &mut CompiledPackage,
+) -> Result<(), anyhow::Error> {
+    let pkgs = compiled_package.find_immediate_deps_pkgs_to_keep(with_unpublished_dependencies)?;
+    let pkg_ids: Vec<_> = pkgs.clone().into_values().collect();
+
+    let pkg_name_to_orig_id: BTreeMap<_, _> = compiled_package
+        .package
+        .deps_compiled_units
+        .iter()
+        .map(|(pkg_name, module)| (pkg_name, ObjectID::from(module.unit.address.into_inner())))
+        .collect();
+
+    let published_deps_packages = fetch_move_packages(client, &pkg_ids).await?;
+    let linkage_table_ids = published_deps_packages
+        .iter()
+        .flat_map(|pkg| {
+            let linkage_table = pkg.linkage_table();
+            linkage_table.keys().cloned().collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+
+    compiled_package
+        .dependency_ids
+        .published
+        .retain(|pkg_name, id| {
+            linkage_table_ids.contains(id)
+                || pkgs.contains_key(pkg_name)
+                || pkg_name_to_orig_id
+                    .get(pkg_name)
+                    .is_some_and(|orig_id| pkg_ids.contains(orig_id))
+        });
 
     Ok(())
 }

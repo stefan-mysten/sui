@@ -28,7 +28,7 @@ use std::{collections::BTreeMap, path::Path};
 use sui_json::{is_receiving_argument, primitive_type};
 use sui_json_rpc_types::{SuiObjectData, SuiObjectDataOptions, SuiRawData};
 use sui_move::manage_package::resolve_lock_file_path;
-use sui_sdk::apis::ReadApi;
+use sui_sdk::SuiClient;
 use sui_types::{
     base_types::{is_primitive_type_tag, ObjectID, TxContext, TxContextKind},
     move_package::MovePackage,
@@ -223,7 +223,7 @@ pub struct PTBBuilder<'a> {
     /// transaction arguments.
     resolved_arguments: BTreeMap<String, Tx::Argument>,
     /// Read API for reading objects from chain. Needed for object resolution.
-    reader: &'a ReadApi,
+    client: &'a SuiClient,
     /// The last command that we have added. This is used to support assignment commands.
     last_command: Option<Tx::Argument>,
     /// The actual PTB that we are building up.
@@ -275,14 +275,14 @@ impl ArgWithHistory {
 }
 
 impl<'a> PTBBuilder<'a> {
-    pub fn new(starting_env: BTreeMap<String, AccountAddress>, reader: &'a ReadApi) -> Self {
+    pub fn new(starting_env: BTreeMap<String, AccountAddress>, client: &'a SuiClient) -> Self {
         Self {
             addresses: starting_env,
             identifiers: BTreeMap::new(),
             arguments_to_resolve: BTreeMap::new(),
             resolved_arguments: BTreeMap::new(),
             ptb: ProgrammableTransactionBuilder::new(),
-            reader,
+            client,
             last_command: None,
             errors: Vec::new(),
         }
@@ -412,7 +412,8 @@ impl<'a> PTBBuilder<'a> {
         loc: Span,
     ) -> PTBResult<MovePackage> {
         let object = self
-            .reader
+            .client
+            .read_api()
             .get_object_with_options(package_id, SuiObjectDataOptions::bcs_lossless())
             .await
             .map_err(|e| err!(loc, "{e}"))?
@@ -763,7 +764,8 @@ impl<'a> PTBBuilder<'a> {
     /// Fetch the `SuiObjectData` for an object ID -- this is used for object resolution.
     async fn get_object(&self, object_id: ObjectID, obj_loc: Span) -> PTBResult<SuiObjectData> {
         let res = self
-            .reader
+            .client
+            .read_api()
             .get_object_with_options(
                 object_id,
                 SuiObjectDataOptions::new().with_type().with_owner(),
@@ -931,8 +933,8 @@ impl<'a> PTBBuilder<'a> {
                 self.last_command = Some(res);
             }
             ParsedPTBCommand::Publish(sp!(pkg_loc, package_path)) => {
-                let chain_id = self.reader.get_chain_identifier().await.ok();
                 let build_config = MoveBuildConfig::default();
+                let chain_id = self.client.read_api().get_chain_identifier().await.ok();
                 let package_path = Path::new(&package_path);
                 let build_config = resolve_lock_file_path(build_config.clone(), Some(package_path))
                     .map_err(|e| err!(pkg_loc, "{e}"))?;
@@ -958,7 +960,7 @@ impl<'a> PTBBuilder<'a> {
                     .map_err(|e| err!(pkg_loc, "{e}"))?;
                 }
                 let compiled_package = compile_package(
-                    self.reader,
+                    self.client,
                     build_config.clone(),
                     package_path,
                     false, /* with_unpublished_dependencies */
@@ -999,8 +1001,8 @@ impl<'a> PTBBuilder<'a> {
                     )
                     .await?;
 
-                let chain_id = self.reader.get_chain_identifier().await.ok();
                 let build_config = MoveBuildConfig::default();
+                let chain_id = self.client.read_api().get_chain_identifier().await.ok();
                 let package_path = Path::new(&package_path);
                 let build_config = resolve_lock_file_path(build_config.clone(), Some(package_path))
                     .map_err(|e| err!(path_loc, "{e}"))?;
@@ -1027,7 +1029,7 @@ impl<'a> PTBBuilder<'a> {
                 }
 
                 let (upgrade_policy, compiled_package) = upgrade_package(
-                    self.reader,
+                    self.client,
                     build_config.clone(),
                     package_path,
                     ObjectID::from_address(upgrade_cap_id.into_inner()),

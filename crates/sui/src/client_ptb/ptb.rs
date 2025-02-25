@@ -235,7 +235,7 @@ impl PTB {
             .into_iter()
             .map(|(sa, alias)| (alias.alias.clone(), AccountAddress::from(*sa)))
             .collect();
-        let builder = PTBBuilder::new(starting_addresses, client.read_api());
+        let builder = PTBBuilder::new(starting_addresses, &client);
         builder.build(program).await
     }
 
