@@ -33,11 +33,11 @@ use move_package::{
         build_plan::BuildPlan, compiled_package::CompiledPackage as MoveCompiledPackage,
     },
     package_hooks::{PackageHooks, PackageIdentifier},
-    resolution::resolution_graph::ResolvedGraph,
+    resolution::{dependency_graph::DependencyGraph, resolution_graph::ResolvedGraph},
     source_package::parsed_manifest::{
         Dependencies, Dependency, DependencyKind, GitInfo, InternalDependency, PackageName,
     },
-    BuildConfig as MoveBuildConfig,
+    BuildConfig as MoveBuildConfig, LintFlag,
 };
 use move_package::{
     source_package::parsed_manifest::OnChainInfo, source_package::parsed_manifest::SourceManifest,
@@ -128,7 +128,6 @@ impl BuildConfig {
             install_dir: Some(install_dir),
             lint_flag: LintFlag::LEVEL_NONE,
             silence_warnings: true,
-            implicit_dependencies: Dependencies::new(),
             ..MoveBuildConfig::default()
         };
         BuildConfig {
@@ -283,9 +282,9 @@ pub fn build_from_resolution_graph(
 
     // compile!
     let result = if print_diags_to_stderr {
-        BuildConfig::compile_package(resolution_graph, &mut std::io::stderr())
+        BuildConfig::compile_package(&resolution_graph, &mut std::io::stderr())
     } else {
-        BuildConfig::compile_package(resolution_graph, &mut std::io::sink())
+        BuildConfig::compile_package(&resolution_graph, &mut std::io::sink())
     };
 
     let (package, fn_info) = result.map_err(|error| SuiError::ModuleBuildFailure {
@@ -302,6 +301,7 @@ pub fn build_from_resolution_graph(
         published_at,
         dependency_ids,
         bytecode_deps,
+        dependency_graph: resolution_graph.graph,
     })
 }
 
