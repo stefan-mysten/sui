@@ -1769,7 +1769,7 @@ fn check_dep_verification_flags(
     }
 }
 
-fn compile_package_simple(
+async fn compile_package_simple(
     client: &SuiClient,
     mut build_config: MoveBuildConfig,
     package_path: &Path,
@@ -1871,12 +1871,11 @@ pub(crate) async fn compile_package(
     with_unpublished_dependencies: bool,
     skip_dependency_verification: bool,
 ) -> Result<CompiledPackage, anyhow::Error> {
+    let read_api = client.read_api();
     let protocol_config = read_api.get_protocol_config(None).await?;
     let protocol_version = protocol_config.protocol_version;
-
     build_config.implicit_dependencies = implicit_deps_for_protocol_version(protocol_version)?;
 
-    let read_api = client.read_api();
     let config = resolve_lock_file_path(build_config, Some(package_path))?;
     let run_bytecode_verifier = true;
     let print_diags_to_stderr = true;
