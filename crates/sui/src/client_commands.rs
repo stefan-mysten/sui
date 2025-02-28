@@ -3169,37 +3169,61 @@ pub(crate) async fn pkg_tree_shake(
     with_unpublished_dependencies: bool,
     compiled_package: &mut CompiledPackage,
 ) -> Result<(), anyhow::Error> {
-    let pkgs = compiled_package.find_immediate_deps_pkgs_to_keep(with_unpublished_dependencies)?;
-    let pkg_ids = pkgs.values().cloned().collect::<Vec<_>>();
-    let pkg_id_to_name = pkgs
-        .iter()
-        .map(|(name, id)| (id, name))
-        .collect::<BTreeMap<_, _>>();
+    // these are packages that are immediate dependencies of the root package
+    let immediate_dep_packages =
+        compiled_package.find_immediate_deps_pkgs_to_keep(with_unpublished_dependencies)?;
+    let immediate_dep_pkgs_ids = immediate_dep_packages.values().cloned().collect::<Vec<_>>();
 
+    // if there's no lock file, the id will always be the one set in the [addresses] section
     let pkg_name_to_orig_id: BTreeMap<_, _> = compiled_package
         .package
         .deps_compiled_units
         .iter()
-        .map(|(pkg_name, module)| (pkg_name, ObjectID::from(module.unit.address.into_inner())))
+        .map(|(pkg_name, module)| (*pkg_name, ObjectID::from(module.unit.address.into_inner())))
         .collect();
 
-    let published_deps_packages = fetch_move_packages(read_api, &pkg_ids, &pkg_id_to_name).await?;
-
-    let linkage_table_ids: BTreeSet<_> = published_deps_packages
+    // need to find the trans dependencies of the immediate dep_pkgs
+    let pkg_id_to_name: BTreeMap<_, _> = immediate_dep_packages
         .iter()
-        .flat_map(|pkg| pkg.linkage_table().keys())
+        .map(|(name, id)| (id, name))
         .collect();
+    let immediate_dep_move_pkgs =
+        fetch_move_packages(read_api, &immediate_dep_pkgs_ids, &pkg_id_to_name).await?;
+    let immediate_dep_pkgs_linkage_tables: BTreeMap<_, _> = immediate_dep_move_pkgs
+        .iter()
+        .flat_map(|pkg| pkg.linkage_table())
+        .collect();
+
+    // for every immediate dep package, we need to use its linkage table to determine its
+    // transitive dependencies and ensure that we keep the required packages
+    let mut pkgs_to_keep: BTreeSet<&Symbol> = BTreeSet::new();
+    let published_pkgs = compiled_package.dependency_ids.published.clone();
+    for (linkage_orig_id, upgrade_info) in &immediate_dep_pkgs_linkage_tables {
+        // orig id
+        for (name, id) in &pkg_name_to_orig_id {
+            if *linkage_orig_id == id {
+                pkgs_to_keep.insert(name);
+            }
+        }
+
+        // for dependencies on pkgs that are upgrades, find the name of the published
+        // package by matching the upgraded package id with the published package id
+        for (name, id) in &published_pkgs {
+            if &upgrade_info.upgraded_id == id {
+                pkgs_to_keep.insert(name);
+            }
+        }
+    }
+
+    // need to also keep the immediate dep packages
+    for pkg in immediate_dep_packages.keys() {
+        pkgs_to_keep.insert(pkg);
+    }
 
     compiled_package
         .dependency_ids
         .published
-        .retain(|pkg_name, id| {
-            linkage_table_ids.contains(id)
-                || pkgs.contains_key(pkg_name)
-                || pkg_name_to_orig_id
-                    .get(pkg_name)
-                    .is_some_and(|orig_id| pkg_ids.contains(orig_id))
-        });
+        .retain(|pkg, _| pkgs_to_keep.contains(&pkg));
 
     Ok(())
 }

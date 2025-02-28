@@ -4523,6 +4523,49 @@ async fn test_tree_shaking_package_deps_on_pkg_upgrade_1() -> Result<(), anyhow:
 }
 
 #[sim_test]
+async fn test_tree_shaking_package_deps_on_pkg_upgrade_2() -> Result<(), anyhow::Error> {
+    let mut test = TreeShakingTest::new().await?;
+
+    // Publish package K
+    let (package_k_id, cap) = test.publish_package("K", false).await?;
+    let package_path = test.package_path("K");
+    add_published_id_to_manifest(&package_path, &package_k_id, false)?;
+    // Upgrade package K (named K_v2)
+    std::fs::copy(
+        test.package_path("K").join("Move.lock"),
+        test.package_path("K_v2").join("Move.lock"),
+    )?;
+    let package_k_v2_id = test.upgrade_package("K_v2", cap).await?;
+
+    let package_path = test.package_path("K_v2");
+    add_published_id_to_manifest(&package_path, &package_k_v2_id, false)?;
+
+    let (package_l_id, _) = test.publish_package("L_depends_on_K", false).await?;
+    let linkage_table_l = test.fetch_linkage_table(package_l_id).await;
+    assert!(
+        linkage_table_l.contains_key(&package_k_id),
+        "Package L should depend on K"
+    );
+
+    add_published_id_to_manifest(&test.package_path("L_depends_on_K"), &package_l_id, false)?;
+
+    let (package_m_id, _) = test
+        .publish_package("M_depends_on_L_and_K_v2_no_code_references_K_v2", false)
+        .await?;
+    let linkage_table_m = test.fetch_linkage_table(package_m_id).await;
+    assert!(
+        linkage_table_m.contains_key(&package_k_id),
+        "Package M should depend on K"
+    );
+
+    assert!(linkage_table_m
+        .get(&package_k_id)
+        .is_some_and(|x| x.upgraded_id == package_k_v2_id), "Package I should depend on A_v2 after upgrade, and the UpgradeInfo should have matching ids");
+
+    Ok(())
+}
+
+#[sim_test]
 async fn test_tree_shaking_package_system_deps() -> Result<(), anyhow::Error> {
     let mut test = TreeShakingTest::new().await?;
 
