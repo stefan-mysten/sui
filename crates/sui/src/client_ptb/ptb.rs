@@ -10,6 +10,7 @@ use crate::{
         token::{Lexeme, Token},
     },
     displays::Pretty,
+    mvr_resolver::*,
     sp,
 };
 
@@ -53,6 +54,7 @@ impl PTB {
             ptb_description().print_help().unwrap();
             return Ok(());
         }
+        println!("PTB args: {:?}", self.args);
         let source_string = to_source_string(self.args.clone());
 
         // Tokenize once to detect help flags
@@ -65,6 +67,30 @@ impl PTB {
                 _ => continue,
             }
         }
+
+        // Before parsing stage, resolve any MVR style packages
+        let mut new_tokens = tokens.clone().map(String::from).collect::<Vec<String>>();
+        let mvr_tokens = MvrResolver::from_tokens(tokens.clone());
+        let resolved_mvr_addresses = mvr_tokens
+            .resolve_into_addresses(context.get_client().await?.read_api())
+            .await
+            .map_err(|e| anyhow!("Failed to resolve MVR addresses: {e}"))?;
+        if !resolved_mvr_addresses.resolution.is_empty() {
+            for t in new_tokens.iter_mut() {
+                if let Some(name) = mvr_tokens.token_to_name.get(t) {
+                    let new_token = t.replace(
+                        name,
+                        &resolved_mvr_addresses
+                            .resolution
+                            .get(name)
+                            .unwrap()
+                            .package_id,
+                    );
+                    *t = new_token;
+                }
+            }
+        }
+        println!("New tokens: {:?}", new_tokens);
 
         // Tokenize and parse to get the program
         let (program, program_metadata) = match ProgramParser::new(tokens)
