@@ -74,7 +74,7 @@ impl MvrResolver {
         }
 
         let request = reqwest::Client::new();
-        let url = mvr_req_url(read_api).await?;
+        let (url, chain) = mvr_req_url(read_api).await?;
         let body = serde_json::to_string(&self).expect("Failed to serialize request body");
         let response = request
             .post(url)
@@ -87,7 +87,7 @@ impl MvrResolver {
 
         anyhow::ensure!(
             resolved_addresses.resolution.len() == self.names.len(),
-            "expected {} addresses but got {}. Could not find package id for {}",
+            "expected {} addresses but got {}. Could not find package id for {} for {chain} enviroment",
             self.names.len(),
             resolved_addresses.resolution.len(),
             self.names
@@ -109,15 +109,21 @@ impl MvrResolver {
 
 /// Based on the chain id of the current set environment, return the correct MVR URL to use for
 /// resolution.
-async fn mvr_req_url(read_api: &ReadApi) -> Result<&'static str, Error> {
+async fn mvr_req_url(read_api: &ReadApi) -> Result<(&'static str, &'static str), Error> {
     let chain_id = read_api.get_chain_identifier().await?;
     let chain = ChainIdentifier::from_chain_short_id(&chain_id);
 
     if let Some(chain) = chain {
         let chain = chain.chain();
         match chain {
-            Chain::Mainnet => Ok("https://qa.mainnet.mvr.mystenlabs.com/v1/resolution/bulk"),
-            Chain::Testnet => Ok("https://qa.testnet.mvr.mystenlabs.com/v1/resolution/bulk"),
+            Chain::Mainnet => Ok((
+                "https://qa.mainnet.mvr.mystenlabs.com/v1/resolution/bulk",
+                "mainnet",
+            )),
+            Chain::Testnet => Ok((
+                "https://qa.testnet.mvr.mystenlabs.com/v1/resolution/bulk",
+                "testnet",
+            )),
             Chain::Unknown => {
                 anyhow::bail!("Unsupported chain identifier: {:?}", chain);
             }

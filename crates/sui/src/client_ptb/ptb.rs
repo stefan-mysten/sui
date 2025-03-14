@@ -93,21 +93,22 @@ impl PTB {
         println!("New tokens: {:?}", new_tokens);
 
         // Tokenize and parse to get the program
-        let (program, program_metadata) = match ProgramParser::new(tokens)
-            .map_err(|e| vec![e])
-            .and_then(|parser| parser.parse())
-        {
-            Err(errors) => {
-                let suffix = if errors.len() > 1 { "s" } else { "" };
-                let rendered = build_error_reports(&source_string, errors);
-                eprintln!("Encountered error{suffix} when parsing PTB:");
-                for e in rendered.iter() {
-                    eprintln!("{:?}", e);
+        let (program, program_metadata) =
+            match ProgramParser::new(new_tokens.iter().map(|s| s.as_str()))
+                .map_err(|e| vec![e])
+                .and_then(|parser| parser.parse())
+            {
+                Err(errors) => {
+                    let suffix = if errors.len() > 1 { "s" } else { "" };
+                    let rendered = build_error_reports(&source_string, errors);
+                    eprintln!("Encountered error{suffix} when parsing PTB:");
+                    for e in rendered.iter() {
+                        eprintln!("{:?}", e);
+                    }
+                    anyhow::bail!("Could not build PTB due to previous error{suffix}");
                 }
-                anyhow::bail!("Could not build PTB due to previous error{suffix}");
-            }
-            Ok(parsed) => parsed,
-        };
+                Ok(parsed) => parsed,
+            };
 
         ensure!(
             !program_metadata.serialize_unsigned_set || !program_metadata.serialize_signed_set,
