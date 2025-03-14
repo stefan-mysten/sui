@@ -10,6 +10,7 @@ use crate::{
         token::{Lexeme, Token},
     },
     displays::Pretty,
+    mvr_resolver::*,
     sp,
 };
 
@@ -53,6 +54,7 @@ impl PTB {
             ptb_description().print_help().unwrap();
             return Ok(());
         }
+        println!("PTB args: {:?}", self.args);
         let source_string = to_source_string(self.args.clone());
 
         // Tokenize once to detect help flags
@@ -66,22 +68,57 @@ impl PTB {
             }
         }
 
-        // Tokenize and parse to get the program
-        let (program, program_metadata) = match ProgramParser::new(tokens)
-            .map_err(|e| vec![e])
-            .and_then(|parser| parser.parse())
-        {
-            Err(errors) => {
-                let suffix = if errors.len() > 1 { "s" } else { "" };
-                let rendered = build_error_reports(&source_string, errors);
-                eprintln!("Encountered error{suffix} when parsing PTB:");
-                for e in rendered.iter() {
-                    eprintln!("{:?}", e);
+        // Before parsing stage, resolve any MVR style packages
+        let mut new_tokens = tokens.clone().map(String::from).collect::<Vec<String>>();
+        let mvr_resolver = MvrResolver::from_tokens(tokens.clone()).map_err(|e| anyhow!(e))?;
+
+        if mvr_resolver.should_resolve() {
+            let client = context.get_client().await?;
+            let read_api = client.read_api();
+            let resolved_names = mvr_resolver.resolve_names(read_api).await?;
+            let resolved_types = mvr_resolver.resolve_types(read_api).await?;
+            println!("mvr_tokens: {:?}", mvr_resolver);
+            // println!("Resolved names {:?}", resolved_names);
+            // println!("Resolved types {:?}", resolved_types);
+
+            for token in new_tokens.iter_mut() {
+                if let Some(values) = mvr_resolver.token_to_names.get(token) {
+                    for v in values {
+                        if let Some(aa) = resolved_names.resolution.get(v) {
+                            *token = token.replace(v, &aa.package_id);
+                        }
+                    }
                 }
-                anyhow::bail!("Could not build PTB due to previous error{suffix}");
+
+                if let Some(values) = mvr_resolver.token_to_types.get(token) {
+                    for v in values {
+                        if let Some(aa) = resolved_types.resolution.get(v) {
+                            *token = token.replace(v, &aa.type_tag);
+                        }
+                    }
+                }
             }
-            Ok(parsed) => parsed,
-        };
+
+            println!("New tokens: {new_tokens:?}");
+        }
+
+        // Tokenize and parse to get the program
+        let (program, program_metadata) =
+            match ProgramParser::new(new_tokens.iter().map(|s| s.as_str()))
+                .map_err(|e| vec![e])
+                .and_then(|parser| parser.parse())
+            {
+                Err(errors) => {
+                    let suffix = if errors.len() > 1 { "s" } else { "" };
+                    let rendered = build_error_reports(&source_string, errors);
+                    eprintln!("Encountered error{suffix} when parsing PTB:");
+                    for e in rendered.iter() {
+                        eprintln!("{:?}", e);
+                    }
+                    anyhow::bail!("Could not build PTB due to previous error{suffix}");
+                }
+                Ok(parsed) => parsed,
+            };
 
         ensure!(
             !program_metadata.serialize_unsigned_set || !program_metadata.serialize_signed_set,
