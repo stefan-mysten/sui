@@ -9,7 +9,7 @@ use helper::ObjectChecker;
 use jsonrpsee::core::params::ArrayParams;
 use jsonrpsee::{core::client::ClientT, http_client::HttpClientBuilder};
 use std::sync::Arc;
-use sui_faucet::CoinInfo;
+use sui_faucet::{CoinInfo, RequestStatus};
 use sui_json_rpc_types::{
     SuiExecutionStatus, SuiTransactionBlockEffectsAPI, SuiTransactionBlockResponse,
     SuiTransactionBlockResponseOptions, TransactionBlockBytes,
@@ -58,20 +58,30 @@ pub struct TestContext {
 impl TestContext {
     async fn get_sui_from_faucet(&self, minimum_coins: Option<usize>) -> Vec<GasCoin> {
         let addr = self.get_wallet_address();
-        let faucet_response = self.faucet.request_sui_coins(addr).await;
 
-        let coin_info = faucet_response
-            .transferred_gas_objects
+        let minimum_coins = minimum_coins.unwrap_or(1);
+
+        let mut coins = vec![];
+        for _ in 0..minimum_coins {
+            let faucet_response = self.faucet.request_sui_coins(addr).await;
+            if let RequestStatus::Failure(e) = faucet_response.status {
+                panic!("Failed to get coins from faucet: {e}");
+            }
+
+            if let Some(coin_info) = faucet_response.coin_sent {
+                coins.push(coin_info);
+            } else {
+                panic!("Failed to get coins from faucet: no coin sent");
+            }
+        }
+
+        let coin_info = coins
             .iter()
             .map(|coin_info| coin_info.transfer_tx_digest)
             .collect::<Vec<_>>();
         self.let_fullnode_sync(coin_info, 5).await;
 
-        let gas_coins = self
-            .check_owner_and_into_gas_coin(faucet_response.transferred_gas_objects, addr)
-            .await;
-
-        let minimum_coins = minimum_coins.unwrap_or(1);
+        let gas_coins = self.check_owner_and_into_gas_coin(coins, addr).await;
 
         if gas_coins.len() < minimum_coins {
             panic!(

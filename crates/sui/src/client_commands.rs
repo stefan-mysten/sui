@@ -1519,11 +1519,11 @@ impl SuiClientCommands {
 
                     if let Ok(env) = active_env {
                         let network = match env.rpc.as_str() {
-                            SUI_DEVNET_URL => "https://faucet.devnet.sui.io/v1/gas",
+                            SUI_DEVNET_URL => "https://faucet.devnet.sui.io/v2/gas",
                             SUI_TESTNET_URL => {
                                 bail!("For testnet tokens, please use the Web UI: https://faucet.sui.io/?address={address}");
                             }
-                            SUI_LOCAL_NETWORK_URL | SUI_LOCAL_NETWORK_URL_0 => "http://127.0.0.1:9123/gas",
+                            SUI_LOCAL_NETWORK_URL | SUI_LOCAL_NETWORK_URL_0 => "http://127.0.0.1:9123/v2/gas",
                             _ => bail!("Cannot recognize the active network. Please provide the gas faucet full URL.")
                         };
                         network.to_string()
@@ -2694,6 +2694,7 @@ pub async fn request_tokens_from_faucet(
         }
         StatusCode::BAD_REQUEST => {
             let faucet_resp: FaucetResponse = resp.json().await?;
+            println!("{:?}", faucet_resp);
             if let Some(err) = faucet_resp.error {
                 bail!("Faucet request was unsuccessful. {err}");
             }
