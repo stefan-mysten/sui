@@ -32,7 +32,8 @@ use sui_config::{
 use sui_config::{
     SUI_BENCHMARK_GENESIS_GAS_KEYSTORE_FILENAME, SUI_GENESIS_FILENAME, SUI_KEYSTORE_FILENAME,
 };
-use sui_faucet::{create_wallet_context, start_faucet, AppState, FaucetConfig, SimpleFaucet};
+// use sui_faucet::{create_wallet_context, start_faucet, AppState, FaucetConfig, SimpleFaucet};
+use sui_faucet_proxy::{create_wallet_context, start_faucet, AppState, FaucetConfig, LocalFaucet};
 use sui_indexer::test_utils::{
     start_indexer_jsonrpc_for_testing, start_indexer_writer_for_testing,
 };
@@ -64,7 +65,7 @@ use tempfile::tempdir;
 use tracing;
 use tracing::info;
 
-const CONCURRENCY_LIMIT: usize = 30;
+const CONCURRENCY_LIMIT: usize = 300;
 const DEFAULT_EPOCH_DURATION_MS: u64 = 60_000;
 const DEFAULT_FAUCET_NUM_COINS: usize = 5; // 5 coins per request was the default in sui-test-validator
 const DEFAULT_FAUCET_MIST_AMOUNT: u64 = 200_000_000_000; // 200 SUI
@@ -908,8 +909,9 @@ async fn start(
         let config = FaucetConfig {
             host_ip,
             port: faucet_address.port(),
-            num_coins: DEFAULT_FAUCET_NUM_COINS,
+            local: true,
             amount: DEFAULT_FAUCET_MIST_AMOUNT,
+            num_coins: DEFAULT_FAUCET_NUM_COINS,
             ..Default::default()
         };
 
@@ -935,18 +937,16 @@ async fn start(
             .save()
             .unwrap();
         }
-        let faucet_wal = config_dir.join("faucet.wal");
-        let simple_faucet = SimpleFaucet::new(
-            create_wallet_context(config.wallet_client_timeout_secs, config_dir)?,
+
+        let local_faucet = LocalFaucet::new(
+            create_wallet_context(config.wallet_client_timeout_secs, config_dir.clone())?,
             &prometheus_registry,
-            faucet_wal.as_path(),
             config.clone(),
         )
-        .await
-        .unwrap();
+        .await?;
 
         let app_state = Arc::new(AppState {
-            faucet: simple_faucet,
+            faucet: local_faucet,
             config,
         });
 
