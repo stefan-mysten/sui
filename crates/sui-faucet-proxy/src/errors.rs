@@ -1,9 +1,10 @@
 // Copyright (c) Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-#[derive(Error, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Error, Debug, PartialEq, Eq)]
 pub enum FaucetError {
     #[error("Missing X-Turnstile-Token header. For testnet tokens, please use the Web UI: https://faucet.sui.io")]
     MissingTurnstileTokenHeader,

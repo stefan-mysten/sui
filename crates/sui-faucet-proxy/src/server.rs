@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::{
-    requests_manager::RequestsManager, AppState, FaucetConfig, FaucetError, FaucetRequest,
-    RequestMetricsLayer,
+    app_state, requests_manager::RequestsManager, AppState, FaucetConfig, FaucetError,
+    FaucetRequest, RequestMetricsLayer,
 };
 use axum::{
     error_handling::HandleErrorLayer,
@@ -60,17 +60,6 @@ pub async fn start_faucet(
     prometheus_registry: &Registry,
 ) -> Result<(), anyhow::Error> {
     println!("Starting faucet");
-    let (cloudflare_turnstile_url, turnstile_secret_key) = if app_state.config.authenticated {
-        ensure!(TURNSTILE_SECRET_KEY.is_some() && CLOUDFLARE_TURNSTILE_URL.is_some(),
-                "Both CLOUDFLARE_TURNSTILE_URL and TURNSTILE_SECRET_KEY env vars must be set for testnet deployment (--authenticated flag was set)");
-
-        (
-            CLOUDFLARE_TURNSTILE_URL.as_ref().unwrap().to_string(),
-            TURNSTILE_SECRET_KEY.as_ref().unwrap().to_string(),
-        )
-    } else {
-        ("".to_string(), "".to_string())
-    };
 
     // TODO: restrict access if needed
     let cors = CorsLayer::new()
@@ -78,124 +67,12 @@ pub async fn start_faucet(
         .allow_headers(Any)
         .allow_origin(Any);
 
-    let FaucetConfig {
-        port,
-        host_ip,
-        request_buffer_size,
-        max_request_per_second,
-        replenish_quota_interval_ms,
-        reset_time_interval_secs,
-        rate_limiter_cleanup_interval_secs,
-        max_requests_per_ip,
-        local,
-        ..
-    } = app_state.config;
-
-    let token_manager = Arc::new(RequestsManager::new(
-        max_requests_per_ip,
-        Duration::from_secs(reset_time_interval_secs),
-        cloudflare_turnstile_url,
-        turnstile_secret_key,
-    ));
-
-    if local {
-        println!("Starting in local mode");
-        let app = Router::new()
-            .route("/v1/gas", post(request_local_gas))
-            .route("/gas", post(request_local_gas))
-            .layer(
-                ServiceBuilder::new()
-                    .layer(HandleErrorLayer::new(handle_error))
-                    .layer(RequestMetricsLayer::new(prometheus_registry))
-                    .load_shed()
-                    .buffer(request_buffer_size)
-                    .concurrency_limit(concurrency_limit)
-                    .layer(Extension(app_state.clone()))
-                    .layer(Extension(token_manager.clone()))
-                    .layer(cors)
-                    .into_inner(),
-            );
-
-        spawn_monitored_task!(async move {
-            info!("Starting task to clear banned ip addresses.");
-            loop {
-                tokio::time::sleep(Duration::from_secs(1)).await;
-                app_state.faucet.local_request_execute_tx().await;
-            }
-        });
-
-        let addr = SocketAddr::new(IpAddr::V4(host_ip), port);
-        info!("listening on {}", addr);
-        let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-        axum::serve(
-            listener,
-            app.into_make_service_with_connect_info::<SocketAddr>(),
-        )
-        .await?;
-
-        Ok(())
+    if app_state.config.local {
+        // Local faucet
+        start_local_server(app_state, concurrency_limit, prometheus_registry, cors).await
     } else {
-        let governor_cfg = Arc::new(
-            GovernorConfigBuilder::default()
-                .const_per_millisecond(replenish_quota_interval_ms)
-                .burst_size(max_request_per_second as u32)
-                .key_extractor(GlobalKeyExtractor)
-                .finish()
-                .unwrap(),
-        );
-        // // these routes have a more aggressive rate limit to reduce the number of reqs per second as
-        // // per the governor config above.
-        // let global_limited_routes = Router::new()
-        //     .route("/v1/gas", post(batch_request_gas))
-        //     .layer(GovernorLayer {
-        //         config: governor_cfg.clone(),
-        //     });
-        //
-        // // This has its own rate limiter via the RequestManager
-        // let faucet_web_routes = Router::new().route("/v1/faucet_web_gas", post(request_faucet_web_gas));
-        // // Routes with no rate limit
-        // let unrestricted_routes = Router::new()
-        //     .route("/", get(redirect))
-        //     .route("/health", get(health))
-        //     .route("/v1/faucet_discord", post(request_faucet_discord));
-        //
-        // // Combine all routes
-        // let app = Router::new()
-        //     .merge(global_limited_routes)
-        //     .merge(unrestricted_routes)
-        //     .merge(faucet_web_routes)
-        //     .layer(
-        //         ServiceBuilder::new()
-        //             .layer(HandleErrorLayer::new(handle_error))
-        //             .layer(RequestMetricsLayer::new(prometheus_registry))
-        //             .load_shed()
-        //             .buffer(request_buffer_size)
-        //             .concurrency_limit(concurrency_limit)
-        //             .layer(Extension(app_state.clone()))
-        //             .layer(Extension(token_manager.clone()))
-        //             .layer(cors)
-        //             .into_inner(),
-        //     );
-        //
-        // spawn_monitored_task!(async move {
-        //     info!("Starting task to clear banned ip addresses.");
-        //     loop {
-        //         tokio::time::sleep(Duration::from_secs(rate_limiter_cleanup_interval_secs)).await;
-        //         token_manager.cleanup_expired_tokens();
-        //     }
-        // });
-        //
-        // let addr = SocketAddr::new(IpAddr::V4(host_ip), port);
-        // info!("listening on {}", addr);
-        // let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-        // axum::serve(
-        //     listener,
-        //     app.into_make_service_with_connect_info::<SocketAddr>(),
-        // )
-        // .await?;
-        // Ok(())
-
-        Ok(())
+        // Deployed faucet (devnet/testnet)
+        start_non_local_server(app_state, concurrency_limit, prometheus_registry, cors).await
     }
 }
 
@@ -221,8 +98,9 @@ async fn redirect(Host(host): Host) -> Response {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub enum RequestStatus {
+    GasSent,
     Success,
-    Failure,
+    Failure(FaucetError),
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -236,11 +114,18 @@ async fn request_local_gas(
     // ) -> &'static str {
 ) -> impl IntoResponse {
     let FaucetRequest::FixedAmountRequest(request) = payload;
+    info!("Local request to add to queue for faucet");
     state
         .faucet
         .local_request_add_to_queue(request.recipient)
         .await;
-    // info!("Local request to add to queue for faucet");
+
+    (
+        StatusCode::CREATED,
+        Json(FaucetResponse {
+            status: RequestStatus::Success,
+        }),
+    )
 }
 
 async fn process_local_gas_requests(
@@ -248,21 +133,18 @@ async fn process_local_gas_requests(
 ) -> impl IntoResponse {
     let resp = state.faucet.local_request_execute_tx().await;
     match resp {
-        Ok(v) => {
-            // info!("Local request is successfully served");
-            (
-                StatusCode::CREATED,
-                Json(FaucetResponse {
-                    status: RequestStatus::Success,
-                }),
-            )
-        }
-        Err(v) => {
-            // warn!("Failed to request gas: {:?}", v);
+        Ok(_) => (
+            StatusCode::OK,
+            Json(FaucetResponse {
+                status: RequestStatus::GasSent,
+            }),
+        ),
+        Err(error) => {
+            warn!("Failed to request gas: {:?}", error);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(FaucetResponse {
-                    status: RequestStatus::Failure,
+                    status: RequestStatus::Failure(error),
                 }),
             )
         }
@@ -413,4 +295,152 @@ async fn handle_error(error: BoxError) -> impl IntoResponse {
         StatusCode::INTERNAL_SERVER_ERROR,
         Cow::from(format!("Unhandled internal error: {}", error)),
     )
+}
+
+async fn start_non_local_server(
+    app_state: Arc<AppState>,
+    concurrency_limit: usize,
+    prometheus_registry: &Registry,
+    cors: CorsLayer,
+) -> Result<(), anyhow::Error> {
+    let FaucetConfig {
+        port,
+        host_ip,
+        request_buffer_size,
+        max_request_per_second,
+        replenish_quota_interval_ms,
+        reset_time_interval_secs,
+        rate_limiter_cleanup_interval_secs,
+        max_requests_per_ip,
+        local,
+        ..
+    } = app_state.config;
+    let (cloudflare_turnstile_url, turnstile_secret_key) = if app_state.config.authenticated {
+        ensure!(TURNSTILE_SECRET_KEY.is_some() && CLOUDFLARE_TURNSTILE_URL.is_some(),
+                "Both CLOUDFLARE_TURNSTILE_URL and TURNSTILE_SECRET_KEY env vars must be set for testnet deployment (--authenticated flag was set)");
+
+        (
+            CLOUDFLARE_TURNSTILE_URL.as_ref().unwrap().to_string(),
+            TURNSTILE_SECRET_KEY.as_ref().unwrap().to_string(),
+        )
+    } else {
+        ("".to_string(), "".to_string())
+    };
+
+    let token_manager = Arc::new(RequestsManager::new(
+        max_requests_per_ip,
+        Duration::from_secs(reset_time_interval_secs),
+        cloudflare_turnstile_url,
+        turnstile_secret_key,
+    ));
+    let governor_cfg = Arc::new(
+        GovernorConfigBuilder::default()
+            .const_per_millisecond(replenish_quota_interval_ms)
+            .burst_size(max_request_per_second as u32)
+            .key_extractor(GlobalKeyExtractor)
+            .finish()
+            .unwrap(),
+    );
+    // // these routes have a more aggressive rate limit to reduce the number of reqs per second as
+    // // per the governor config above.
+    // let global_limited_routes = Router::new()
+    //     .route("/v1/gas", post(batch_request_gas))
+    //     .layer(GovernorLayer {
+    //         config: governor_cfg.clone(),
+    //     });
+    //
+    // // This has its own rate limiter via the RequestManager
+    // let faucet_web_routes = Router::new().route("/v1/faucet_web_gas", post(request_faucet_web_gas));
+    // // Routes with no rate limit
+    // let unrestricted_routes = Router::new()
+    //     .route("/", get(redirect))
+    //     .route("/health", get(health))
+    //     .route("/v1/faucet_discord", post(request_faucet_discord));
+    //
+    // // Combine all routes
+    // let app = Router::new()
+    //     .merge(global_limited_routes)
+    //     .merge(unrestricted_routes)
+    //     .merge(faucet_web_routes)
+    //     .layer(
+    //         ServiceBuilder::new()
+    //             .layer(HandleErrorLayer::new(handle_error))
+    //             .layer(RequestMetricsLayer::new(prometheus_registry))
+    //             .load_shed()
+    //             .buffer(request_buffer_size)
+    //             .concurrency_limit(concurrency_limit)
+    //             .layer(Extension(app_state.clone()))
+    //             .layer(Extension(token_manager.clone()))
+    //             .layer(cors)
+    //             .into_inner(),
+    //     );
+    //
+    // spawn_monitored_task!(async move {
+    //     info!("Starting task to clear banned ip addresses.");
+    //     loop {
+    //         tokio::time::sleep(Duration::from_secs(rate_limiter_cleanup_interval_secs)).await;
+    //         token_manager.cleanup_expired_tokens();
+    //     }
+    // });
+    //
+    // let addr = SocketAddr::new(IpAddr::V4(host_ip), port);
+    // info!("listening on {}", addr);
+    // let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+    // axum::serve(
+    //     listener,
+    //     app.into_make_service_with_connect_info::<SocketAddr>(),
+    // )
+    // .await?;
+    // Ok(())
+    Ok(())
+}
+
+/// Start a faucet that is run locally. This should only be used for starting a local network, and
+/// not for devnet/testnet deployments!
+async fn start_local_server(
+    app_state: Arc<AppState>,
+    concurrency_limit: usize,
+    prometheus_registry: &Registry,
+    cors: CorsLayer,
+) -> Result<(), anyhow::Error> {
+    let FaucetConfig {
+        port,
+        host_ip,
+        request_buffer_size,
+        ..
+    } = app_state.config;
+
+    println!("Starting in local mode");
+    let app = Router::new()
+        .route("/v1/gas", post(request_local_gas))
+        .route("/gas", post(request_local_gas))
+        .layer(
+            ServiceBuilder::new()
+                .layer(HandleErrorLayer::new(handle_error))
+                .layer(RequestMetricsLayer::new(prometheus_registry))
+                .load_shed()
+                .buffer(request_buffer_size)
+                .concurrency_limit(concurrency_limit)
+                .layer(Extension(app_state.clone()))
+                .layer(cors)
+                .into_inner(),
+        );
+
+    spawn_monitored_task!(async move {
+        info!("Starting task to process requests");
+        loop {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            process_local_gas_requests(Extension(app_state.clone())).await;
+        }
+    });
+    let addr = SocketAddr::new(IpAddr::V4(host_ip), port);
+    info!("listening on {}", addr);
+    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await?;
+
+    Ok(())
 }

@@ -5,8 +5,8 @@ use crate::{metrics::FaucetMetrics, FaucetError};
 use prometheus::Registry;
 #[cfg(test)]
 use std::collections::HashSet;
-use std::fmt;
 use std::sync::Arc;
+use std::{collections::VecDeque, fmt};
 use sui_sdk::{
     rpc_types::{SuiTransactionBlockResponse, SuiTransactionBlockResponseOptions},
     types::quorum_driver_types::ExecuteTransactionRequestType,
@@ -33,7 +33,7 @@ pub struct LocalFaucet {
     ttl_expiration: u64,
     coin_amount: u64,
     num_coins: usize,
-    local_queue: Mutex<Vec<SuiAddress>>,
+    local_queue: Mutex<VecDeque<SuiAddress>>,
 }
 
 /// We do not just derive(Debug) because WalletContext and the WriteAheadLog do not implement Debug / are also hard
@@ -62,7 +62,7 @@ impl LocalFaucet {
         let balance = coins.iter().map(|coin| coin.0.balance.value()).sum::<u64>();
         metrics.balance.set(balance as i64);
 
-        let local_queue = Mutex::new(vec![]);
+        let local_queue = Mutex::new(VecDeque::new());
 
         Ok(Arc::new(LocalFaucet {
             wallet,
@@ -78,7 +78,7 @@ impl LocalFaucet {
 
     pub async fn local_request_add_to_queue(&self, recipient: SuiAddress) {
         let mut queue = self.local_queue.lock().await;
-        queue.push(recipient);
+        queue.push_back(recipient);
     }
 
     pub async fn local_request_execute_tx(&self) -> Result<(), FaucetError> {
@@ -91,15 +91,15 @@ impl LocalFaucet {
         let queue_size = queue.len();
 
         let addresses = if queue_size > 100 {
-            queue.iter_mut().take(100)
+            queue.drain(0..100)
         } else {
-            queue.iter_mut().take(queue_size)
+            queue.drain(0..queue_size)
         };
 
         let mut ptb =
             sui_sdk::types::programmable_transaction_builder::ProgrammableTransactionBuilder::new();
         for recipient in addresses {
-            let recipients = vec![*recipient; self.num_coins];
+            let recipients = vec![recipient; self.num_coins];
             let amounts = vec![self.coin_amount; recipients.len()];
             ptb.pay_sui(recipients, amounts.to_vec())
                 .map_err(FaucetError::internal)?;
@@ -118,7 +118,7 @@ impl LocalFaucet {
             self.active_address,
             vec![coin_id_ref],
             ptb,
-            5000000000,
+            50000000,
             gas_price,
         );
 
