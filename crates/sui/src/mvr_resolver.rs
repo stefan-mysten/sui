@@ -222,6 +222,104 @@ async fn mvr_req_url(read_api: &ReadApi) -> Result<(&'static str, &'static str),
     }
 }
 
+// fn parse_type_parameters(input: &str) -> Vec<String> {
+//     println!("Parsing input: {input}");
+//     // First check if we have angle brackets
+//     if let Some(open_bracket_pos) = input.find('<') {
+//         if let Some(close_bracket_pos) = input.rfind('>') {
+//             // Extract the content inside the outermost angle brackets
+//             let prefix = &input[0..open_bracket_pos];
+//             let content = &input[open_bracket_pos + 1..close_bracket_pos];
+//
+//             // Now split the content by top-level commas
+//             let mut result = Vec::new();
+//             let mut current = String::new();
+//             let mut bracket_level = 0;
+//
+//             for c in content.chars() {
+//                 match c {
+//                     '<' => {
+//                         bracket_level += 1;
+//                         current.push(c);
+//                     }
+//                     '>' => {
+//                         bracket_level -= 1;
+//                         current.push(c);
+//                     }
+//                     ',' => {
+//                         if bracket_level == 0 {
+//                             // Found a top-level comma, add the current part
+//                             let full_type = format!("{}<{}>", prefix, current.trim());
+//                             result.push(full_type);
+//                             current = String::new();
+//                         } else {
+//                             // This comma is inside nested brackets, keep it
+//                             current.push(c);
+//                         }
+//                     }
+//                     _ => current.push(c),
+//                 }
+//             }
+//
+//             // Add the last part
+//             if !current.trim().is_empty() {
+//                 let full_type = format!("{}<{}>", prefix, current.trim());
+//                 result.push(full_type);
+//             }
+//
+//             return result;
+//         }
+//     }
+//
+//     // If no angle brackets or malformed input, return the original string as a single element
+//     vec![input.to_string()]
+// }
+fn parse_type_parameters(input: &str) -> Vec<String> {
+    // Check if the input is empty or doesn't have any type parameters
+    if input.is_empty() || !input.contains('<') {
+        return vec![];
+    }
+
+    let mut result = Vec::new();
+    let mut current_type = String::new();
+    let mut bracket_count = 0;
+    
+    // Iterate through each character in the input
+    for c in input.chars() {
+        match c {
+            '<' => {
+                bracket_count += 1;
+                current_type.push(c);
+            }
+            '>' => {
+                bracket_count -= 1;
+                current_type.push(c);
+            }
+            ',' => {
+                // Only split at top-level commas
+                if bracket_count == 0 {
+                    // If we have a non-empty type, add it to results
+                    if !current_type.trim().is_empty() {
+                        result.push(current_type.trim().to_string());
+                        current_type = String::new();
+                    }
+                } else {
+                    // This comma is within angle brackets, keep it
+                    current_type.push(c);
+                }
+            }
+            // Handle any other character
+            _ => current_type.push(c),
+        }
+    }
+
+    // Don't forget to add the last type
+    if !current_type.trim().is_empty() {
+        result.push(current_type.trim().to_string());
+    }
+
+    result
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -251,6 +349,49 @@ mod tests {
                 "0x1::coin::Coin<sui.test/pkg/1::module::type>".to_string(),
                 "pkg::module::type<@mvr/pkg::module::type, test.sui/pkg::module::type>".to_string()
             ])
+        );
+    }
+
+    #[test]
+    fn test_handle_multiple_types() {
+        let input = [
+            "0x1::option::is_none<u8, u64>",
+            "0x1::option::is_none<u8, @mvr/core::module::Type>",
+            "<0x1::option::is_none<@mvr/core::module::<test.sui::module::Type>>, u64>",
+            "0x1::option::is_none<u8, @mvr/core::module::Type, test.sui::module::Type>",
+        ];
+
+        assert_eq!(
+            vec![
+                "0x1::option::is_none<u8>".to_string(),
+                "0x1::option::is_none<u64>".to_string()
+            ],
+            parse_type_parameters(input[0])
+        );
+
+        assert_eq!(
+            vec![
+                "0x1::option::is_none<u8>",
+                "0x1::option::is_none<@mvr/core::module::Type>"
+            ],
+            parse_type_parameters(input[1])
+        );
+
+        assert_eq!(
+            vec![
+                "0x1::option::is_none<u8>",
+                "0x1::option::is_none<@mvr/core::module::Type>",
+                "0x1::option::is_none<test.sui::module::Type>"
+            ],
+            parse_type_parameters(input[3])
+        );
+
+        assert_eq!(
+            vec![
+                "<0x1::option::is_none<@mvr/core::module::<test.sui::module::Type>>",
+                "<0x1::option::is_none<u64>",
+            ],
+            parse_type_parameters(input[2])
         );
     }
 }
