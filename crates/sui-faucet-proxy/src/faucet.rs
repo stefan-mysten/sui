@@ -88,44 +88,45 @@ impl LocalFaucet {
             FaucetError::internal(format!("Failed to get gas price: {}", e.to_string()))
         })?;
 
-        let chunks = queue
-            .chunks(100)
-            .map(|chunk| chunk.to_vec())
-            .collect::<Vec<_>>();
+        let queue_size = queue.len();
 
-        for chunk in chunks {
-            let mut ptb = sui_sdk::types::programmable_transaction_builder::ProgrammableTransactionBuilder::new();
-            for recipient in chunk {
-                let recipients = vec![recipient; self.num_coins];
-                let amounts = vec![self.coin_amount; recipients.len()];
-                ptb.pay_sui(recipients, amounts.to_vec())
-                    .map_err(FaucetError::internal)?;
-            }
+        let addresses = if queue_size > 100 {
+            queue.iter_mut().take(100)
+        } else {
+            queue.iter_mut().take(queue_size)
+        };
 
-            let ptb = ptb.finish();
-
-            let coin_id_ref = self
-                .wallet
-                .get_object_ref(self.coin_id)
-                .await
-                .map_err(|e| {
-                    FaucetError::internal(format!("Failed to get object ref: {}", e.to_string()))
-                })?;
-            let tx_data = TransactionData::new_programmable(
-                self.active_address,
-                vec![coin_id_ref],
-                ptb,
-                5000000000,
-                gas_price,
-            );
-
-            self.execute_txn_with_retries(tx_data, self.coin_id).await;
+        let mut ptb =
+            sui_sdk::types::programmable_transaction_builder::ProgrammableTransactionBuilder::new();
+        for recipient in addresses {
+            let recipients = vec![*recipient; self.num_coins];
+            let amounts = vec![self.coin_amount; recipients.len()];
+            ptb.pay_sui(recipients, amounts.to_vec())
+                .map_err(FaucetError::internal)?;
         }
 
-        queue.clear();
+        let ptb = ptb.finish();
+
+        let coin_id_ref = self
+            .wallet
+            .get_object_ref(self.coin_id)
+            .await
+            .map_err(|e| {
+                FaucetError::internal(format!("Failed to get object ref: {}", e.to_string()))
+            })?;
+        let tx_data = TransactionData::new_programmable(
+            self.active_address,
+            vec![coin_id_ref],
+            ptb,
+            5000000000,
+            gas_price,
+        );
+
+        self.execute_txn_with_retries(tx_data, self.coin_id).await;
 
         Ok(())
     }
+
     async fn execute_txn(
         &self,
         tx_data: &TransactionData,
