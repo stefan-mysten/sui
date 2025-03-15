@@ -2671,6 +2671,7 @@ pub async fn request_tokens_from_faucet(
         .await?;
 
     match resp.status() {
+        StatusCode::OK => {}
         StatusCode::ACCEPTED | StatusCode::CREATED => {
             let faucet_resp: FaucetResponse = resp.json().await?;
 
@@ -2682,6 +2683,7 @@ pub async fn request_tokens_from_faucet(
         }
         StatusCode::BAD_REQUEST => {
             let faucet_resp: FaucetResponse = resp.json().await?;
+            println!("{:?}", faucet_resp);
             if let Some(err) = faucet_resp.error {
                 bail!("Faucet request was unsuccessful. {err}");
             }
