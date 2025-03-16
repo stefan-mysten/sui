@@ -8,6 +8,7 @@ publish = false
 
 [dependencies]
 anyhow.workspace = true
+bcs.workspace = true
 async-trait.workspace = true
 axum.workspace = true
 bin-version.workspace = true
@@ -17,6 +18,7 @@ thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tracing.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 tower.workspace = true
 tower-http.workspace = true
 http.workspace = true
@@ -33,6 +35,7 @@ tonic.workspace = true
 reqwest.workspace = true
 once_cell.workspace = true
 tower_governor = "0.4.3"
+fastcrypto.workspace = true
 
 sui-sdk.workspace = true
 sui-config.workspace = true

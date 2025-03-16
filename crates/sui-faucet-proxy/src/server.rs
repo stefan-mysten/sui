@@ -7,14 +7,14 @@ use crate::{
 };
 use axum::{
     error_handling::HandleErrorLayer,
-    extract::Host,
+    extract::{ConnectInfo, Host},
     http::{header::HeaderMap, StatusCode},
     response::{IntoResponse, Redirect, Response},
     routing::{get, post},
     BoxError, Extension, Json, Router,
 };
-use dashmap::{mapref::entry::Entry, DashMap};
-use http::Method;
+use fastcrypto::encoding::{Base64, Encoding};
+use http::{header::CONTENT_TYPE, Method};
 use mysten_metrics::spawn_monitored_task;
 use prometheus::Registry;
 use serde::{Deserialize, Serialize};
@@ -22,11 +22,19 @@ use std::{
     borrow::Cow,
     net::{IpAddr, SocketAddr},
     path::PathBuf,
+    str::FromStr,
     sync::Arc,
-    time::{Duration, Instant},
+    time::Duration,
 };
-use sui_config::SUI_CLIENT_CONFIG;
-use sui_sdk::wallet_context::WalletContext;
+use sui_config::{sui_config_dir, SUI_CLIENT_CONFIG, SUI_KEYSTORE_FILENAME};
+use sui_sdk::{
+    rpc_types::{SuiObjectRef, SuiTransactionBlockEffects, SuiTransactionBlockEffectsAPI},
+    types::{
+        base_types::{ObjectID, SuiAddress},
+        transaction::TransactionData,
+    },
+    wallet_context::WalletContext,
+};
 use tower::ServiceBuilder;
 use tower_governor::{
     governor::GovernorConfigBuilder, key_extractor::GlobalKeyExtractor, GovernorLayer,
@@ -36,8 +44,17 @@ use tracing::{error, info, warn};
 
 use anyhow::ensure;
 use once_cell::sync::Lazy;
+use serde_json::json;
+use shared_crypto::intent::Intent;
+use sui_keys::keystore::{AccountKeystore, FileBasedKeystore};
 
 const DEFAULT_FAUCET_WEB_APP_URL: &str = "https://faucet.sui.io";
+
+static GAS_AUTH_TOKEN: Lazy<String> = Lazy::new(|| {
+    std::env::var("GAS_AUTH_TOKEN")
+        .ok()
+        .unwrap_or_else(|| ("".to_string()))
+});
 
 static FAUCET_WEB_APP_URL: Lazy<String> = Lazy::new(|| {
     std::env::var("FAUCET_WEB_APP_URL")
@@ -108,6 +125,22 @@ struct FaucetResponse {
     pub status: RequestStatus,
 }
 
+impl From<FaucetError> for FaucetResponse {
+    fn from(value: FaucetError) -> Self {
+        FaucetResponse {
+            status: RequestStatus::Failure(value),
+        }
+    }
+}
+
+impl From<reqwest::Error> for FaucetResponse {
+    fn from(value: reqwest::Error) -> Self {
+        FaucetResponse {
+            status: RequestStatus::Failure(FaucetError::internal(value)),
+        }
+    }
+}
+
 async fn request_local_gas(
     Extension(state): Extension<Arc<AppState>>,
     Json(payload): Json<FaucetRequest>,
@@ -151,125 +184,314 @@ async fn process_local_gas_requests(
     }
 }
 
-// /// A route for requests coming from the discord bot.
-// async fn request_faucet_discord(
-//     headers: HeaderMap,
-//     Extension(state): Extension<Arc<AppState>>,
-//     Json(payload): Json<FaucetRequest>,
-// ) -> impl IntoResponse {
-//     if state.config.authenticated {
-//         let Some(agent_value) = headers
-//             .get(reqwest::header::USER_AGENT)
-//             .and_then(|v| v.to_str().ok())
-//         else {
-//             return (
-//                 StatusCode::BAD_REQUEST,
-//                 Json(BatchFaucetResponse::from(FaucetError::InvalidUserAgent(
-//                     "Invalid user agent for this route".to_string(),
-//                 ))),
-//             );
-//         };
-//
-//         if agent_value != *DISCORD_BOT_PWD {
-//             return (
-//                 StatusCode::BAD_REQUEST,
-//                 Json(BatchFaucetResponse::from(FaucetError::InvalidUserAgent(
-//                     "Invalid user agent for this route".to_string(),
-//                 ))),
-//             );
-//         }
-//     }
-//
-//     let FaucetRequest::FixedAmountRequest(request) = payload else {
-//         return (
-//             StatusCode::BAD_REQUEST,
-//             Json(BatchFaucetResponse::from(FaucetError::Internal(
-//                 "Input Error.".to_string(),
-//             ))),
-//         );
-//     };
-//
-//     batch_request_spawn_task(request, state).await
-// }
-//
-// /// Handler for requests coming from the frontend faucet web app.
-// async fn request_faucet_web_gas(
-//     headers: HeaderMap,
-//     ConnectInfo(addr): ConnectInfo<SocketAddr>,
-//     Extension(token_manager): Extension<Arc<RequestsManager>>,
-//     Extension(state): Extension<Arc<AppState>>,
-//     Json(payload): Json<FaucetRequest>,
-// ) -> impl IntoResponse {
-//     if state.config.authenticated {
-//         let Some(token) = headers
-//             .get("X-Turnstile-Token")
-//             .and_then(|v| v.to_str().ok())
-//         else {
-//             return (
-//                 StatusCode::BAD_REQUEST,
-//                 Json(BatchFaucetResponse::from(
-//                     FaucetError::MissingTurnstileTokenHeader,
-//                 )),
-//             );
-//         };
-//
-//         let validation = token_manager.validate_turnstile_token(addr, token).await;
-//
-//         if let Err((status_code, faucet_error)) = validation {
-//             return (status_code, Json(BatchFaucetResponse::from(faucet_error)));
-//         }
-//     }
-//
-//     let FaucetRequest::FixedAmountRequest(request) = payload else {
-//         return (
-//             StatusCode::BAD_REQUEST,
-//             Json(BatchFaucetResponse::from(FaucetError::Internal(
-//                 "Input Error.".to_string(),
-//             ))),
-//         );
-//     };
-//
-//     batch_request_spawn_task(request, state).await
-// }
-//
-// /// handler for all the request_gas requests
-// async fn request_gas_from_pool(
-//     Extension(state): Extension<Arc<AppState>>,
-//     Json(payload): Json<FaucetRequest>,
-// ) -> impl IntoResponse {
-//     // ID for traceability
-//     let id = Uuid::new_v4();
-//     info!(uuid = ?id, "Got new gas request.");
-//
-//     let result = match payload {
-//         FaucetRequest::FixedAmountRequest(requests) => {
-//             // We spawn a tokio task for this such that connection drop will not interrupt
-//             // it and impact the recycling of coins
-//         }
-//         _ => {
-//             return (
-//                 StatusCode::BAD_REQUEST,
-//                 Json(FaucetResponse::from(FaucetError::Internal(
-//                     "Input Error.".to_string(),
-//                 ))),
+/// A route for requests coming from the discord bot.
+async fn request_faucet_discord(
+    headers: HeaderMap,
+    Extension(state): Extension<Arc<AppState>>,
+    Json(payload): Json<FaucetRequest>,
+) -> impl IntoResponse {
+    if state.config.authenticated {
+        let Some(agent_value) = headers
+            .get(reqwest::header::USER_AGENT)
+            .and_then(|v| v.to_str().ok())
+        else {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(FaucetResponse::from(FaucetError::InvalidUserAgent(
+                    "Invalid user agent for this route".to_string(),
+                ))),
+            );
+        };
+
+        if agent_value != *DISCORD_BOT_PWD {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(FaucetResponse::from(FaucetError::InvalidUserAgent(
+                    "Invalid user agent for this route".to_string(),
+                ))),
+            );
+        }
+    }
+
+    let FaucetRequest::FixedAmountRequest(request) = payload else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(FaucetResponse::from(FaucetError::Internal(
+                "Input Error.".to_string(),
+            ))),
+        );
+    };
+
+    (
+        StatusCode::BAD_REQUEST,
+        Json(FaucetResponse::from(FaucetError::Internal(
+            "Input Error.".to_string(),
+        ))),
+    )
+    // batch_request_spawn_task(request, state).await
+}
+
+/// Handler for requests coming from the frontend faucet web app.
+async fn request_faucet_web_gas(
+    headers: HeaderMap,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    Extension(token_manager): Extension<Arc<RequestsManager>>,
+    Extension(state): Extension<Arc<AppState>>,
+    Json(payload): Json<FaucetRequest>,
+) -> impl IntoResponse {
+    if state.config.authenticated {
+        let Some(token) = headers
+            .get("X-Turnstile-Token")
+            .and_then(|v| v.to_str().ok())
+        else {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(FaucetResponse::from(
+                    FaucetError::MissingTurnstileTokenHeader,
+                )),
+            );
+        };
+
+        let validation = token_manager.validate_turnstile_token(addr, token).await;
+
+        if let Err((status_code, faucet_error)) = validation {
+            return (status_code, Json(FaucetResponse::from(faucet_error)));
+        }
+    }
+
+    let FaucetRequest::FixedAmountRequest(request) = payload else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(FaucetResponse::from(FaucetError::Internal(
+                "Input Error.".to_string(),
+            ))),
+        );
+    };
+    (
+        StatusCode::BAD_REQUEST,
+        Json(FaucetResponse::from(FaucetError::Internal(
+            "Input Error.".to_string(),
+        ))),
+    )
+
+    // batch_request_spawn_task(request, state).await
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct GasPoolRequest {
+    gas_budget: u64,
+    reserve_duration_secs: u64,
+}
+pub type ReservationID = u64;
+pub type ExpirationTimeMs = u64;
+pub type GasGroupKey = ObjectID;
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ReserveGasResponse {
+    pub result: Option<ReserveGasResult>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ReserveGasResult {
+    pub sponsor_address: SuiAddress,
+    pub reservation_id: ReservationID,
+    pub gas_coins: Vec<SuiObjectRef>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ExecuteTxRequest {
+    /// This must be the same reservation ID returned in ReserveGasResponse.
+    pub reservation_id: ReservationID,
+    /// BCS serialized transaction data bytes without its type tag, as base-64 encoded string.
+    pub tx_bytes: Base64,
+    /// User signature (`flag || signature || pubkey` bytes, as base-64 encoded string). Signature is committed to the intent message of the transaction data, as base-64 encoded string.
+    pub user_sig: Base64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ExecuteTxResponse {
+    pub effects: Option<SuiTransactionBlockEffects>,
+    pub error: Option<String>,
+}
+
+/// handler for all the request_gas requests
+async fn request_gas_from_pool(
+    Extension(state): Extension<Arc<AppState>>,
+    Json(payload): Json<FaucetRequest>,
+) -> impl IntoResponse {
+    // ID for traceability
+    // let id = Uuid::new_v4();
+    // info!(uuid = ?id, "Got new gas request.");
+
+    let FaucetRequest::FixedAmountRequest(request) = payload else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(FaucetResponse::from(FaucetError::Internal(
+                "Input Error.".to_string(),
+            ))),
+        );
+    };
+
+    let gas_pool_request = GasPoolRequest {
+        gas_budget: 1000000,
+        reserve_duration_secs: state.config.ttl_expiration,
+    };
+
+    let client = reqwest::Client::new();
+    let url = "GAS_POOL_URL";
+    let response = client
+        .post(url)
+        .header("Content-Type", "application/json")
+        .bearer_auth(GAS_AUTH_TOKEN.to_string())
+        .json(&json!(gas_pool_request))
+        .send()
+        .await;
+
+    if let Err(error) = response {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(FaucetResponse::from(error)),
+        );
+    }
+
+    let response: Result<ReserveGasResponse, _> = response.unwrap().json().await;
+
+    if let Err(error) = response {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(FaucetResponse::from(error)),
+        );
+    }
+
+    let response = response.unwrap();
+
+    if let Some(error) = response.error {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(FaucetResponse {
+                status: RequestStatus::Failure(FaucetError::internal(error)),
+            }),
+        );
+    }
+
+    if let Some(data) = response.result {
+        let reservation_id = data.reservation_id;
+        let gas_payment = data.gas_coins.iter().map(|x| x.to_object_ref()).collect();
+        let mut tx_builder =
+            sui_sdk::types::programmable_transaction_builder::ProgrammableTransactionBuilder::new();
+
+        tx_builder
+            .pay_sui(vec![request.recipient], vec![1_000_000_000])
+            .unwrap();
+        let tx = tx_builder.finish();
+        let sender = data.sponsor_address;
+        let tx_data = TransactionData::new_programmable(sender, gas_payment, tx, 50000000, 1000);
+        let tx_bytes = Base64::from_bytes(&bcs::to_bytes(&tx_data).unwrap());
+        let keystore =
+            FileBasedKeystore::new(&sui_config_dir().unwrap().join(SUI_KEYSTORE_FILENAME)).unwrap();
+        let sig = keystore
+            .sign_secure(&sender, &tx_data, Intent::sui_transaction())
+            .unwrap();
+        let user_sig = Base64::from_bytes(sig.as_ref());
+
+        let gas_pool_request = ExecuteTxRequest {
+            reservation_id,
+            tx_bytes,
+            user_sig,
+        };
+
+        let gas_pool_request = client
+            .post(url)
+            .header(CONTENT_TYPE, "application/json")
+            .bearer_auth(GAS_AUTH_TOKEN.to_string())
+            .json(&json!(gas_pool_request))
+            .send()
+            .await;
+
+        let Ok(gas_pool_response) = gas_pool_request else {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(FaucetResponse {
+                    status: RequestStatus::Failure(FaucetError::Internal(format!(
+                        "Gas pool request failed: {}",
+                        gas_pool_request.unwrap_err()
+                    ))),
+                }),
+            );
+        };
+
+        let Ok(ExecuteTxResponse { effects, error }) = gas_pool_response.json().await else {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(FaucetResponse {
+                    status: RequestStatus::Failure(FaucetError::Internal(format!(
+                        "Could not decode gas pool response json"
+                    ))),
+                }),
+            );
+        };
+
+        if let Some(effects) = effects {
+            let status = effects.status();
+            if status.is_ok() {
+                return (
+                    StatusCode::OK,
+                    Json(FaucetResponse {
+                        status: RequestStatus::GasSent,
+                    }),
+                );
+            } else {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(FaucetResponse::from(FaucetError::Internal(
+                        "Could not ".to_string(),
+                    ))),
+                );
+            }
+        } else {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(FaucetResponse::from(FaucetError::Internal(
+                    "Could not ".to_string(),
+                ))),
+            );
+        }
+    }
+
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(FaucetResponse::from(FaucetError::Internal(
+            "Could not ".to_string(),
+        ))),
+    )
+}
+
+// async fn request_spawn_task(
+//     request: GasPoolRequest
+//     state: Arc<AppState>,
+// ) -> (StatusCode, Json<BatchFaucetResponse>) {
+//     let result = spawn_monitored_task!(async move {
+//         state
+//             .faucet
+//             .batch_send(
+//                 Uuid::new_v4(),
+//                 request.recipient,
+//                 &vec![state.config.amount; state.config.num_coins],
 //             )
-//         }
-//     };
+//             .await
+//     })
+//     .await
+//     .unwrap();
 //     match result {
-//         Ok(v) => {
-//             info!(uuid =?id, "Request is successfully served");
-//             (StatusCode::CREATED, Json(FaucetResponse::from(v)))
-//         }
-//         Err(v) => {
-//             warn!(uuid =?id, "Failed to request gas: {:?}", v);
-//             (
-//                 StatusCode::INTERNAL_SERVER_ERROR,
-//                 Json(FaucetResponse::from(v)),
-//             )
-//         }
+//         Ok(v) => (StatusCode::ACCEPTED, Json(BatchFaucetResponse::from(v))),
+//         Err(v) => (
+//             StatusCode::INTERNAL_SERVER_ERROR,
+//             Json(BatchFaucetResponse::from(v)),
+//         ),
 //     }
 // }
-//
+
 pub fn create_wallet_context(
     timeout_secs: u64,
     config_dir: PathBuf,
@@ -341,57 +563,57 @@ async fn start_non_local_server(
             .finish()
             .unwrap(),
     );
-    // // these routes have a more aggressive rate limit to reduce the number of reqs per second as
-    // // per the governor config above.
-    // let global_limited_routes = Router::new()
-    //     .route("/v1/gas", post(batch_request_gas))
-    //     .layer(GovernorLayer {
-    //         config: governor_cfg.clone(),
-    //     });
-    //
-    // // This has its own rate limiter via the RequestManager
-    // let faucet_web_routes = Router::new().route("/v1/faucet_web_gas", post(request_faucet_web_gas));
-    // // Routes with no rate limit
-    // let unrestricted_routes = Router::new()
-    //     .route("/", get(redirect))
-    //     .route("/health", get(health))
-    //     .route("/v1/faucet_discord", post(request_faucet_discord));
-    //
-    // // Combine all routes
-    // let app = Router::new()
-    //     .merge(global_limited_routes)
-    //     .merge(unrestricted_routes)
-    //     .merge(faucet_web_routes)
-    //     .layer(
-    //         ServiceBuilder::new()
-    //             .layer(HandleErrorLayer::new(handle_error))
-    //             .layer(RequestMetricsLayer::new(prometheus_registry))
-    //             .load_shed()
-    //             .buffer(request_buffer_size)
-    //             .concurrency_limit(concurrency_limit)
-    //             .layer(Extension(app_state.clone()))
-    //             .layer(Extension(token_manager.clone()))
-    //             .layer(cors)
-    //             .into_inner(),
-    //     );
-    //
-    // spawn_monitored_task!(async move {
-    //     info!("Starting task to clear banned ip addresses.");
-    //     loop {
-    //         tokio::time::sleep(Duration::from_secs(rate_limiter_cleanup_interval_secs)).await;
-    //         token_manager.cleanup_expired_tokens();
-    //     }
-    // });
-    //
-    // let addr = SocketAddr::new(IpAddr::V4(host_ip), port);
-    // info!("listening on {}", addr);
-    // let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-    // axum::serve(
-    //     listener,
-    //     app.into_make_service_with_connect_info::<SocketAddr>(),
-    // )
-    // .await?;
-    // Ok(())
+    // these routes have a more aggressive rate limit to reduce the number of reqs per second as
+    // per the governor config above.
+    let global_limited_routes = Router::new()
+        .route("/v1/gas", post(request_gas_from_pool))
+        .layer(GovernorLayer {
+            config: governor_cfg.clone(),
+        });
+
+    // This has its own rate limiter via the RequestManager
+    let faucet_web_routes = Router::new().route("/v1/faucet_web_gas", post(request_faucet_web_gas));
+    // Routes with no rate limit
+    let unrestricted_routes = Router::new()
+        .route("/", get(redirect))
+        .route("/health", get(health))
+        .route("/v1/faucet_discord", post(request_faucet_discord));
+
+    // Combine all routes
+    let app = Router::new()
+        .merge(global_limited_routes)
+        .merge(unrestricted_routes)
+        .merge(faucet_web_routes)
+        .layer(
+            ServiceBuilder::new()
+                .layer(HandleErrorLayer::new(handle_error))
+                .layer(RequestMetricsLayer::new(prometheus_registry))
+                .load_shed()
+                .buffer(request_buffer_size)
+                .concurrency_limit(concurrency_limit)
+                .layer(Extension(app_state.clone()))
+                .layer(Extension(token_manager.clone()))
+                .layer(cors)
+                .into_inner(),
+        );
+
+    spawn_monitored_task!(async move {
+        info!("Starting task to clear banned ip addresses.");
+        loop {
+            tokio::time::sleep(Duration::from_secs(rate_limiter_cleanup_interval_secs)).await;
+            token_manager.cleanup_expired_tokens();
+        }
+    });
+
+    let addr = SocketAddr::new(IpAddr::V4(host_ip), port);
+    info!("listening on {}", addr);
+    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await?;
+
     Ok(())
 }
 
