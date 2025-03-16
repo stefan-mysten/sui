@@ -13542,16 +13542,18 @@ dependencies = [
 
 [[package]]
 name = "sui-faucet-proxy"
-version = "1.45.0"
+version = "1.46.0"
 dependencies = [
  "anyhow",
  "async-recursion",
  "async-trait",
  "axum 0.7.5",
+ "bcs",
  "bin-version",
  "clap",
  "dashmap",
  "eyre",
+ "fastcrypto",
  "futures",
  "http 1.1.0",
  "mysten-metrics",

@@ -86,7 +86,7 @@ pub async fn start_faucet(
 
     if app_state.config.local {
         // Local faucet
-        start_local_server(app_state, concurrency_limit, prometheus_registry, cors).await
+        start_local_server(app_state, concurrency_limit, prometheus_registry).await
     } else {
         // Deployed faucet (devnet/testnet)
         start_non_local_server(app_state, concurrency_limit, prometheus_registry, cors).await
@@ -621,16 +621,10 @@ async fn start_non_local_server(
 /// not for devnet/testnet deployments!
 async fn start_local_server(
     app_state: Arc<AppState>,
-    concurrency_limit: usize,
     prometheus_registry: &Registry,
     cors: CorsLayer,
 ) -> Result<(), anyhow::Error> {
-    let FaucetConfig {
-        port,
-        host_ip,
-        request_buffer_size,
-        ..
-    } = app_state.config;
+    let FaucetConfig { port, host_ip, .. } = app_state.config;
 
     println!("Starting in local mode");
     let app = Router::new()
@@ -641,8 +635,6 @@ async fn start_local_server(
                 .layer(HandleErrorLayer::new(handle_error))
                 .layer(RequestMetricsLayer::new(prometheus_registry))
                 .load_shed()
-                .buffer(request_buffer_size)
-                .concurrency_limit(concurrency_limit)
                 .layer(Extension(app_state.clone()))
                 .layer(cors)
                 .into_inner(),
