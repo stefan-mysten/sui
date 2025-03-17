@@ -75,7 +75,7 @@ impl MvrResolver {
 
         for t in tokens {
             if t.contains("@") || t.contains(".sui") {
-                if t.contains("<") {
+                if t.starts_with("<") {
                     // we have a type tag
                     let token = if t.starts_with("<") {
                         t[1..t.len() - 1].to_string()
@@ -95,6 +95,38 @@ impl MvrResolver {
                     // types.insert(token.clone());
                     types.extend(collect_type_tags.clone());
                     token_to_types.insert(t.to_string(), collect_type_tags.into_iter().collect());
+                }
+                if t.contains("<") {
+                    // if we have something like pkg::module::function<type, type, type>, we want
+                    // to split it as the initial pkg::module::function is not a type arg.
+                    let split = t.split_once("<");
+
+                    if let Some((first, rest)) = split {
+                        // this could be a versioned name, so let's try to parse it.
+                        let versioned_name = mvr_types::name::VersionedName::from_str(first);
+                        if let Ok(versioned_name) = versioned_name {
+                            names.insert(versioned_name.to_string());
+                            token_to_names.insert(t.to_string(), vec![versioned_name.to_string()]);
+                        }
+
+                        // the rest is type tag
+                        let token = rest[0..rest.len() - 1].to_string();
+
+                        // these are the type tags that we found which we need to pass to the MVR
+                        // forward lookup service
+                        let collect_type_tags = extract_types_for_resolver(&token);
+                        // double check they are correctly formed
+                        collect_type_tags
+                            .iter()
+                            .map(|t| NamedType::parse_names(t))
+                            .collect::<Result<Vec<_>, _>>()
+                            .map_err(|e| anyhow::anyhow!(e))?;
+
+                        // types.insert(token.clone());
+                        types.extend(collect_type_tags.clone());
+                        token_to_types
+                            .insert(t.to_string(), collect_type_tags.into_iter().collect());
+                    }
                 } else {
                     let versioned_name = mvr_types::name::VersionedName::from_str(t);
                     if let Ok(versioned_name) = versioned_name {
@@ -185,13 +217,11 @@ impl MvrResolver {
             .send()
             .await?;
 
-        println!("response: {:?}", response);
-
         let resolved_types: ResolvedTypes = response.json().await?;
 
         anyhow::ensure!(
             resolved_types.resolution.len() == self.types.len(),
-            "expected {} addresses but got {}. Could not find package id for {} for {chain} enviroment",
+            "expected {} resolved types but got {}. Could not find id for {} for {chain} enviroment",
             self.types.len(),
             resolved_types.resolution.len(),
             self.types
@@ -262,20 +292,30 @@ mod tests {
             // version
             "test.sui/pkg::module::function",     // package name
             "test.sui/pkg::module::function<u8>", // package name
+            "test.sui/pkg::module::function<u8, @mvr/pkg::module::TYPE>", // package name
         ];
 
-        let resolver = MvrResolver::from_tokens(tokens.iter().cloned()).unwrap();
+        let resolver = MvrResolver::from_tokens(tokens.into_iter()).unwrap();
 
         assert_eq!(resolver.names.len(), 1);
         assert_eq!(resolver.names.first().unwrap(), "test.sui/pkg");
-        assert_eq!(resolver.types.len(), 2);
+        assert_eq!(resolver.types.len(), 3);
         assert_eq!(
             resolver.types,
             BTreeSet::from([
                 "@mvr/pkg::module::type".to_string(),
                 "test.sui/pkg/1::module::type".to_string(),
+                "@mvr/pkg::module::TYPE".to_string(),
             ])
         );
+
+        assert!(MvrResolver::from_tokens(
+            [
+            "test.sui/pkg::module::function<u8, @mvr/pkg::module:TYPE>", // Missing : before TYPE
+        ]
+            .into_iter()
+        )
+        .is_err());
     }
 
     #[test]
@@ -283,7 +323,7 @@ mod tests {
         let tokens = [
             "0x1::option::is_none<u8>",
             "pkg::module::func<u8, @mvr/core::module::Type, test.sui::module::Type>>",
-            "pkg::module::func<u8, @mvr/core::module::Type<u8, test.sui::module::Type>, test.sui::module::Type>>",
+            "pkg::module::func<u8, @mvr/core::module::Type<u8, test.sui::module::Type>, test.sui::module::Type1>>",
             "<u8, @mvr/core::module::Type, test.sui::module::Type>>",
             "<@mvr/core::module::Type, test.sui::module::Type>>",
             "<@mvr/core::module::Type>",
@@ -301,7 +341,8 @@ mod tests {
             extract_types_for_resolver(tokens[2]),
             BTreeSet::from([
                 "@mvr/core::module::Type".to_string(),
-                "test.sui::module::Type".to_string()
+                "test.sui::module::Type".to_string(),
+                "test.sui::module::Type1".to_string()
             ])
         );
         assert_eq!(
