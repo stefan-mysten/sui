@@ -22,7 +22,6 @@ use std::{
     borrow::Cow,
     net::{IpAddr, SocketAddr},
     path::PathBuf,
-    str::FromStr,
     sync::Arc,
     time::Duration,
 };
@@ -48,6 +47,7 @@ use serde_json::json;
 use shared_crypto::intent::Intent;
 use sui_keys::keystore::{AccountKeystore, FileBasedKeystore};
 
+const GAS_POOL_URL: &str = "http://127.0.0.1:9527";
 const DEFAULT_FAUCET_WEB_APP_URL: &str = "https://faucet.sui.io";
 
 static GAS_AUTH_TOKEN: Lazy<String> = Lazy::new(|| {
@@ -86,7 +86,7 @@ pub async fn start_faucet(
 
     if app_state.config.local {
         // Local faucet
-        start_local_server(app_state, concurrency_limit, prometheus_registry).await
+        start_local_server(app_state, prometheus_registry, cors).await
     } else {
         // Deployed faucet (devnet/testnet)
         start_non_local_server(app_state, concurrency_limit, prometheus_registry, cors).await
@@ -339,9 +339,9 @@ async fn request_gas_from_pool(
     };
 
     let client = reqwest::Client::new();
-    let url = "GAS_POOL_URL";
+    let url = format!("{}/v1/reserve_gas", GAS_POOL_URL);
     let response = client
-        .post(url)
+        .post(&url)
         .header("Content-Type", "application/json")
         .bearer_auth(GAS_AUTH_TOKEN.to_string())
         .json(&json!(gas_pool_request))
@@ -401,6 +401,7 @@ async fn request_gas_from_pool(
             user_sig,
         };
 
+        let url = format!("{}/v1/execute_tx", GAS_POOL_URL);
         let gas_pool_request = client
             .post(url)
             .header(CONTENT_TYPE, "application/json")
@@ -444,16 +445,16 @@ async fn request_gas_from_pool(
             } else {
                 return (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(FaucetResponse::from(FaucetError::Internal(
-                        "Could not ".to_string(),
-                    ))),
+                    Json(FaucetResponse::from(FaucetError::Internal(format!(
+                        "Failed to execute transaction"
+                    )))),
                 );
             }
         } else {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(FaucetResponse::from(FaucetError::Internal(
-                    "Could not ".to_string(),
+                    "Transaction has empty effects".to_string(),
                 ))),
             );
         }
@@ -576,6 +577,7 @@ async fn start_non_local_server(
     // Routes with no rate limit
     let unrestricted_routes = Router::new()
         .route("/", get(redirect))
+        .route("/v1/test", get(request_gas_from_pool))
         .route("/health", get(health))
         .route("/v1/faucet_discord", post(request_faucet_discord));
 
