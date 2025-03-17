@@ -6,6 +6,7 @@ use crate::{
     client_ptb::ptb::PTB,
     displays::Pretty,
     key_identity::{get_identity_address, KeyIdentity},
+    mvr_resolver::MvrResolver,
     upgrade_compatibility::check_compatibility,
     verifier_meter::{AccumulatingMeter, Accumulator},
 };
@@ -145,7 +146,7 @@ pub enum SuiClientCommands {
     Call {
         /// Object ID of the package, which contains the module
         #[clap(long)]
-        package: ObjectID,
+        package: String,
         /// The name of the module in the package
         #[clap(long)]
         module: String,
@@ -156,10 +157,10 @@ pub enum SuiClientCommands {
         /// All must be specified, or the call will fail.
         #[clap(
             long,
-            value_parser = parse_sui_type_tag,
+            // value_parser = parse_sui_type_tag,
             num_args(1..),
         )]
-        type_args: Vec<TypeTag>,
+        type_args: Vec<String>,
         /// Simplified ordered args like in the function syntax
         /// ObjectIDs, Addresses must be hex strings
         #[clap(long, num_args(1..))]
@@ -1252,6 +1253,54 @@ impl SuiClientCommands {
                 args,
                 opts,
             } => {
+                // resolve any @ / .sui mvr pkgs
+                let mut tokens = vec![package.clone()];
+                // type args we should pass them with "<>"
+                tokens.extend(type_args.clone().iter().map(|x| format!("<{x}>")));
+                let mvr_resolver = MvrResolver::from_tokens(tokens.iter().map(|x| x.as_str()))?;
+
+                let (package, type_args) = {
+                    if mvr_resolver.should_resolve() {
+                        let client = context.get_client().await?;
+                        let read_api = client.read_api();
+                        let resolved_names = mvr_resolver.resolve_names(read_api).await?;
+                        let resolved_types = mvr_resolver.resolve_types(read_api).await?;
+                        let package = tokens[0].clone();
+                        let mut new_package: String = "".to_string();
+                        if let Some(values) = mvr_resolver.token_to_names.get(&package) {
+                            for v in values {
+                                if let Some(aa) = resolved_names.resolution.get(v) {
+                                    new_package = package.replace(v, &aa.package_id);
+                                }
+                            }
+                        }
+
+                        for token in tokens[1..].iter_mut() {
+                            if let Some(values) = mvr_resolver.token_to_types.get(token) {
+                                for v in values {
+                                    if let Some(aa) = resolved_types.resolution.get(v) {
+                                        *token = token.replace(v, &aa.type_tag);
+                                    }
+                                }
+                            }
+                        }
+
+                        let new_type_tags: Vec<TypeTag> = tokens[1..]
+                            .into_iter()
+                            // remove the < and > from the string that we added earlier
+                            .map(|x| parse_sui_type_tag(&x[1..x.len() - 1]))
+                            .collect::<Result<Vec<_>, _>>()?;
+
+                        (ObjectID::from_hex_literal(&new_package)?, new_type_tags)
+                    } else {
+                        let type_args = type_args
+                            .into_iter()
+                            .map(|x| parse_sui_type_tag(&x))
+                            .collect::<Result<Vec<_>, _>>()?;
+                        (ObjectID::from_hex_literal(&package)?, type_args)
+                    }
+                };
+
                 // Convert all numeric input to String, this will allow number input from the CLI
                 // without failing SuiJSON's checks.
                 let args = args

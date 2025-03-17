@@ -526,7 +526,7 @@ async fn test_ptb_publish_and_complex_arg_resolution() -> Result<(), anyhow::Err
     let package_id_str = package.reference.object_id.to_string();
 
     let start_call_result = SuiClientCommands::Call {
-        package: package.reference.object_id,
+        package: package.reference.object_id.to_string(),
         module: "test_module".to_string(),
         function: "new_shared".to_string(),
         type_args: vec![],
@@ -858,7 +858,7 @@ async fn test_move_call_args_linter_command() -> Result<(), anyhow::Error> {
 
     // Test case with no gas specified
     let resp = SuiClientCommands::Call {
-        package,
+        package: package.to_string(),
         module: "object_basics".to_string(),
         function: "create".to_string(),
         type_args: vec![],
@@ -895,7 +895,7 @@ async fn test_move_call_args_linter_command() -> Result<(), anyhow::Error> {
     }
 
     let resp = SuiClientCommands::Call {
-        package,
+        package: package.to_string(),
         module: "object_basics".to_string(),
         function: "create".to_string(),
         type_args: vec![],
@@ -919,7 +919,7 @@ async fn test_move_call_args_linter_command() -> Result<(), anyhow::Error> {
     ];
 
     let resp = SuiClientCommands::Call {
-        package,
+        package: package.to_string(),
         module: "object_basics".to_string(),
         function: "transfer".to_string(),
         type_args: vec![],
@@ -940,7 +940,7 @@ async fn test_move_call_args_linter_command() -> Result<(), anyhow::Error> {
     ];
 
     let resp = SuiClientCommands::Call {
-        package,
+        package: package.to_string(),
         module: "object_basics".to_string(),
         function: "transfer".to_string(),
         type_args: vec![],
@@ -968,7 +968,7 @@ async fn test_move_call_args_linter_command() -> Result<(), anyhow::Error> {
     ];
 
     SuiClientCommands::Call {
-        package,
+        package: package.to_string(),
         module: "object_basics".to_string(),
         function: "transfer".to_string(),
         type_args: vec![],
@@ -986,7 +986,7 @@ async fn test_move_call_args_linter_command() -> Result<(), anyhow::Error> {
     ];
 
     let result = SuiClientCommands::Call {
-        package,
+        package: package.to_string(),
         module: "object_basics".to_string(),
         function: "create".to_string(),
         type_args: vec![],
@@ -1217,7 +1217,7 @@ async fn test_delete_shared_object() -> Result<(), anyhow::Error> {
 
     // Start and then receive the object
     let start_call_result = SuiClientCommands::Call {
-        package: (*package_id.object_id).into(),
+        package: package_id.object_id.to_string(),
         module: "sod".to_string(),
         function: "start".to_string(),
         type_args: vec![],
@@ -1237,7 +1237,7 @@ async fn test_delete_shared_object() -> Result<(), anyhow::Error> {
     };
 
     let delete_result = SuiClientCommands::Call {
-        package: (*package_id.object_id).into(),
+        package: package_id.object_id.to_string(),
         module: "sod".to_string(),
         function: "delete".to_string(),
         type_args: vec![],
@@ -1322,7 +1322,7 @@ async fn test_receive_argument() -> Result<(), anyhow::Error> {
 
     // Start and then receive the object
     let start_call_result = SuiClientCommands::Call {
-        package: (*package_id.object_id).into(),
+        package: package_id.object_id.to_string(),
         module: "tto".to_string(),
         function: "start".to_string(),
         type_args: vec![],
@@ -1359,7 +1359,7 @@ async fn test_receive_argument() -> Result<(), anyhow::Error> {
         };
 
     let receive_result = SuiClientCommands::Call {
-        package: (*package_id.object_id).into(),
+        package: package_id.object_id.to_string(),
         module: "tto".to_string(),
         function: "receiver".to_string(),
         type_args: vec![],
@@ -1447,7 +1447,7 @@ async fn test_receive_argument_by_immut_ref() -> Result<(), anyhow::Error> {
 
     // Start and then receive the object
     let start_call_result = SuiClientCommands::Call {
-        package: (*package_id.object_id).into(),
+        package: package_id.object_id.to_string(),
         module: "tto".to_string(),
         function: "start".to_string(),
         type_args: vec![],
@@ -1484,7 +1484,7 @@ async fn test_receive_argument_by_immut_ref() -> Result<(), anyhow::Error> {
         };
 
     let receive_result = SuiClientCommands::Call {
-        package: (*package_id.object_id).into(),
+        package: package_id.object_id.to_string(),
         module: "tto".to_string(),
         function: "invalid_call_immut_ref".to_string(),
         type_args: vec![],
@@ -1572,7 +1572,7 @@ async fn test_receive_argument_by_mut_ref() -> Result<(), anyhow::Error> {
 
     // Start and then receive the object
     let start_call_result = SuiClientCommands::Call {
-        package: (*package_id.object_id).into(),
+        package: package_id.object_id.to_string(),
         module: "tto".to_string(),
         function: "start".to_string(),
         type_args: vec![],
@@ -1609,7 +1609,7 @@ async fn test_receive_argument_by_mut_ref() -> Result<(), anyhow::Error> {
         };
 
     let receive_result = SuiClientCommands::Call {
-        package: (*package_id.object_id).into(),
+        package: package_id.object_id.to_string(),
         module: "tto".to_string(),
         function: "invalid_call_mut_ref".to_string(),
         type_args: vec![],
@@ -4117,7 +4117,7 @@ async fn test_clever_errors() -> Result<(), anyhow::Error> {
 
     // Normal abort
     let non_clever_abort = SuiClientCommands::Call {
-        package: package.reference.object_id,
+        package: package.reference.object_id.to_string(),
         module: "clever_errors".to_string(),
         function: "aborter".to_string(),
         type_args: vec![],
@@ -4131,7 +4131,7 @@ async fn test_clever_errors() -> Result<(), anyhow::Error> {
 
     // Line-only abort
     let line_only_abort = SuiClientCommands::Call {
-        package: package.reference.object_id,
+        package: package.reference.object_id.to_string(),
         module: "clever_errors".to_string(),
         function: "aborter_line_no".to_string(),
         type_args: vec![],
@@ -4145,7 +4145,7 @@ async fn test_clever_errors() -> Result<(), anyhow::Error> {
 
     // Full clever error with utf-8 string
     let clever_error_utf8 = SuiClientCommands::Call {
-        package: package.reference.object_id,
+        package: package.reference.object_id.to_string(),
         module: "clever_errors".to_string(),
         function: "clever_aborter".to_string(),
         type_args: vec![],
@@ -4159,7 +4159,7 @@ async fn test_clever_errors() -> Result<(), anyhow::Error> {
 
     // Full clever error with non-utf-8 string
     let clever_error_non_utf8 = SuiClientCommands::Call {
-        package: package.reference.object_id,
+        package: package.reference.object_id.to_string(),
         module: "clever_errors".to_string(),
         function: "clever_aborter_not_a_string".to_string(),
         type_args: vec![],
