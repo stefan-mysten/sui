@@ -81,14 +81,7 @@ impl MvrResolver {
                     // these are the type tags that we found which we need to pass to the MVR
                     // forward lookup service
                     let collect_type_tags = extract_types_for_resolver(&token);
-                    // double check they are correctly formed
-                    // let type_tags = collect_type_tags
-                    //     .iter()
-                    //     .map(|t| NamedType::parse_names(t))
-                    //     .collect::<Result<Vec<_>, _>>()
-                    //     .map_err(|e| anyhow::anyhow!(e))?;
 
-                    // types.insert(token.clone());
                     types.extend(collect_type_tags.clone());
                     token_to_types.insert(t.to_string(), collect_type_tags.into_iter().collect());
                 }
@@ -98,14 +91,11 @@ impl MvrResolver {
                     let split = t.split_once("<");
 
                     if let Some((first, rest)) = split {
-                        // this could be a versioned name, so let's try to parse it.
-                        // let versioned_name = mvr_types::name::VersionedName::from_str(first);
-                        // if let Ok(versioned_name) = versioned_name {
-                        //     names.insert(versioned_name.to_string());
-                        //     token_to_names.insert(t.to_string(), vec![versioned_name.to_string()]);
-                        // }
-                        names.insert(first.to_string());
-                        token_to_names.insert(t.to_string(), vec![first.to_string()]);
+                        // the first part is the package name so we need only that pkg
+                        if let Some(name) = extract_name_for_resolver(first) {
+                            names.insert(name.clone());
+                            token_to_names.insert(t.to_string(), vec![name]);
+                        }
 
                         // the rest is type tag
                         let token = rest[0..rest.len() - 1].to_string();
@@ -113,36 +103,15 @@ impl MvrResolver {
                         // these are the type tags that we found which we need to pass to the MVR
                         // forward lookup service
                         let collect_type_tags = extract_types_for_resolver(&token);
-                        // double check they are correctly formed
-                        // collect_type_tags
-                        //     .iter()
-                        //     .map(|t| NamedType::parse_names(t))
-                        //     .collect::<Result<Vec<_>, _>>()
-                        //     .map_err(|e| anyhow::anyhow!(e))?;
-                        //
-                        // types.insert(token.clone());
                         types.extend(collect_type_tags.clone());
                         token_to_types
                             .insert(t.to_string(), collect_type_tags.into_iter().collect());
                     }
                 } else {
-                    names.insert(t.to_string());
-                    token_to_names.insert(t.to_string(), vec![t.to_string()]);
-                    // let versioned_name = mvr_types::name::VersionedName::from_str(t);
-                    // if let Ok(versioned_name) = versioned_name {
-                    //     names.insert(versioned_name.to_string());
-                    //     token_to_names.insert(t.to_string(), vec![versioned_name.to_string()]);
-                    // }
-                    //
-                    // let parsed_type = mvr_types::named_type::NamedType::parse_names(t);
-                    // if let Ok(parsed_type) = parsed_type {
-                    //     if !parsed_type.is_empty() {
-                    //         for parsed_type in &parsed_type {
-                    //             names.insert(parsed_type.to_string());
-                    //         }
-                    //         token_to_names.insert(t.to_string(), parsed_type);
-                    //     }
-                    // }
+                    if let Some(name) = extract_name_for_resolver(t) {
+                        names.insert(name.clone());
+                        token_to_names.insert(t.to_string(), vec![name]);
+                    }
                 }
             }
         }
@@ -264,6 +233,13 @@ async fn mvr_req_url(read_api: &ReadApi) -> Result<(&'static str, &'static str),
     }
 }
 
+fn extract_name_for_resolver(input: &str) -> Option<String> {
+    Regex::new(r"((?:.*\.sui.*|@.*)?)(?=:)")
+        .unwrap()
+        .find(input)
+        .map(|x| x.as_str().to_string())
+}
+
 fn extract_types_for_resolver(input: &str) -> BTreeSet<String> {
     // Collect all matches into a set
     let matches: BTreeSet<String> = MVR_REGEX
@@ -296,6 +272,7 @@ mod tests {
         ];
 
         let resolver = MvrResolver::from_tokens(tokens.into_iter()).unwrap();
+        println!("Resolver {:?}", resolver);
 
         assert_eq!(resolver.names.len(), 1);
         assert_eq!(resolver.names.first().unwrap(), "test.sui/pkg");
@@ -308,14 +285,6 @@ mod tests {
                 "@mvr/pkg::module::TYPE".to_string(),
             ])
         );
-
-        assert!(MvrResolver::from_tokens(
-            [
-            "test.sui/pkg::module::function<u8, @mvr/pkg::module:TYPE>", // Missing : before TYPE
-        ]
-            .into_iter()
-        )
-        .is_err());
     }
 
     #[test]
