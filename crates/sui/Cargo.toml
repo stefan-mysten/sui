@@ -51,8 +51,6 @@ tracing.workspace = true
 uuid.workspace = true
 url.workspace = true
 
-mvr-types = { git = "https://github.com/MystenLabs/mvr.git", rev = "962f2a6", package = "mvr-types" }
-
 sui-config.workspace = true
 sui-bridge.workspace = true
 sui-execution.workspace = true

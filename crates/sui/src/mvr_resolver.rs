@@ -2,14 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use anyhow::Error;
-use mvr_types::named_type::NamedType;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    str::FromStr,
-};
+use std::collections::{BTreeMap, BTreeSet};
 use sui_protocol_config::Chain;
 use sui_sdk::apis::ReadApi;
 use sui_types::digests::ChainIdentifier;
@@ -86,11 +82,11 @@ impl MvrResolver {
                     // forward lookup service
                     let collect_type_tags = extract_types_for_resolver(&token);
                     // double check they are correctly formed
-                    collect_type_tags
-                        .iter()
-                        .map(|t| NamedType::parse_names(t))
-                        .collect::<Result<Vec<_>, _>>()
-                        .map_err(|e| anyhow::anyhow!(e))?;
+                    // let type_tags = collect_type_tags
+                    //     .iter()
+                    //     .map(|t| NamedType::parse_names(t))
+                    //     .collect::<Result<Vec<_>, _>>()
+                    //     .map_err(|e| anyhow::anyhow!(e))?;
 
                     // types.insert(token.clone());
                     types.extend(collect_type_tags.clone());
@@ -103,11 +99,13 @@ impl MvrResolver {
 
                     if let Some((first, rest)) = split {
                         // this could be a versioned name, so let's try to parse it.
-                        let versioned_name = mvr_types::name::VersionedName::from_str(first);
-                        if let Ok(versioned_name) = versioned_name {
-                            names.insert(versioned_name.to_string());
-                            token_to_names.insert(t.to_string(), vec![versioned_name.to_string()]);
-                        }
+                        // let versioned_name = mvr_types::name::VersionedName::from_str(first);
+                        // if let Ok(versioned_name) = versioned_name {
+                        //     names.insert(versioned_name.to_string());
+                        //     token_to_names.insert(t.to_string(), vec![versioned_name.to_string()]);
+                        // }
+                        names.insert(first.to_string());
+                        token_to_names.insert(t.to_string(), vec![first.to_string()]);
 
                         // the rest is type tag
                         let token = rest[0..rest.len() - 1].to_string();
@@ -116,33 +114,35 @@ impl MvrResolver {
                         // forward lookup service
                         let collect_type_tags = extract_types_for_resolver(&token);
                         // double check they are correctly formed
-                        collect_type_tags
-                            .iter()
-                            .map(|t| NamedType::parse_names(t))
-                            .collect::<Result<Vec<_>, _>>()
-                            .map_err(|e| anyhow::anyhow!(e))?;
-
+                        // collect_type_tags
+                        //     .iter()
+                        //     .map(|t| NamedType::parse_names(t))
+                        //     .collect::<Result<Vec<_>, _>>()
+                        //     .map_err(|e| anyhow::anyhow!(e))?;
+                        //
                         // types.insert(token.clone());
                         types.extend(collect_type_tags.clone());
                         token_to_types
                             .insert(t.to_string(), collect_type_tags.into_iter().collect());
                     }
                 } else {
-                    let versioned_name = mvr_types::name::VersionedName::from_str(t);
-                    if let Ok(versioned_name) = versioned_name {
-                        names.insert(versioned_name.to_string());
-                        token_to_names.insert(t.to_string(), vec![versioned_name.to_string()]);
-                    }
-
-                    let parsed_type = mvr_types::named_type::NamedType::parse_names(t);
-                    if let Ok(parsed_type) = parsed_type {
-                        if !parsed_type.is_empty() {
-                            for parsed_type in &parsed_type {
-                                names.insert(parsed_type.to_string());
-                            }
-                            token_to_names.insert(t.to_string(), parsed_type);
-                        }
-                    }
+                    names.insert(t.to_string());
+                    token_to_names.insert(t.to_string(), vec![t.to_string()]);
+                    // let versioned_name = mvr_types::name::VersionedName::from_str(t);
+                    // if let Ok(versioned_name) = versioned_name {
+                    //     names.insert(versioned_name.to_string());
+                    //     token_to_names.insert(t.to_string(), vec![versioned_name.to_string()]);
+                    // }
+                    //
+                    // let parsed_type = mvr_types::named_type::NamedType::parse_names(t);
+                    // if let Ok(parsed_type) = parsed_type {
+                    //     if !parsed_type.is_empty() {
+                    //         for parsed_type in &parsed_type {
+                    //             names.insert(parsed_type.to_string());
+                    //         }
+                    //         token_to_names.insert(t.to_string(), parsed_type);
+                    //     }
+                    // }
                 }
             }
         }
