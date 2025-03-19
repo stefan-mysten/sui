@@ -6,9 +6,6 @@ use thiserror::Error;
 
 #[derive(Serialize, Deserialize, Error, Debug, PartialEq, Eq)]
 pub enum FaucetError {
-    #[error("Missing X-Turnstile-Token header. For testnet tokens, please use the Web UI: https://faucet.sui.io")]
-    MissingTurnstileTokenHeader,
-
     #[error("Request limit exceeded. {0}")]
     TooManyRequests(String),
 
@@ -38,20 +35,11 @@ pub enum FaucetError {
     #[error("Coin Transfer Failed `{0}`")]
     Transfer(String),
 
-    #[error("Too many coins in the batch queue. Please try again later.")]
-    BatchSendQueueFull,
-
-    #[error("Request consumer queue closed.")]
-    ChannelClosed,
-
     #[error("Coin amounts sent are incorrect:`{0}`")]
     CoinAmountTransferredIncorrect(String),
 
     #[error("Internal error: {0}")]
     Internal(String),
-
-    #[error("Invalid user agent: {0}")]
-    InvalidUserAgent(String),
 }
 
 impl FaucetError {
