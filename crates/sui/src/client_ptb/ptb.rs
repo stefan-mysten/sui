@@ -72,36 +72,36 @@ impl PTB {
         let mut new_tokens = tokens.clone().map(String::from).collect::<Vec<String>>();
         let mvr_resolver = MvrResolver::from_tokens(tokens.clone()).map_err(|e| anyhow!(e))?;
 
-        if mvr_resolver.should_resolve() {
-            let client = context.get_client().await?;
-            let read_api = client.read_api();
-            let resolved_names = mvr_resolver.resolve_names(read_api).await?;
-            let resolved_types = mvr_resolver.resolve_types(read_api).await?;
-            println!("mvr_tokens: {:?}", mvr_resolver);
-            // println!("Resolved names {:?}", resolved_names);
-            // println!("Resolved types {:?}", resolved_types);
-
-            for token in new_tokens.iter_mut() {
-                if let Some(values) = mvr_resolver.token_to_names.get(token) {
-                    for v in values {
-                        if let Some(aa) = resolved_names.resolution.get(v) {
-                            *token = token.replace(v, &aa.package_id);
-                        }
-                    }
-                }
-
-                if let Some(values) = mvr_resolver.token_to_types.get(token) {
-                    for v in values {
-                        if let Some(aa) = resolved_types.resolution.get(v) {
-                            *token = token.replace(v, &aa.type_tag);
-                        }
-                    }
-                }
-            }
-
-            println!("New tokens: {new_tokens:?}");
-        }
-
+        // if mvr_resolver.should_resolve() {
+        //     let client = context.get_client().await?;
+        //     let read_api = client.read_api();
+        //     let resolved_names = mvr_resolver.resolve_names(read_api).await?;
+        //     let resolved_types = mvr_resolver.resolve_types(read_api).await?;
+        //     println!("mvr_tokens: {:?}", mvr_resolver);
+        //     // println!("Resolved names {:?}", resolved_names);
+        //     // println!("Resolved types {:?}", resolved_types);
+        //
+        //     for token in new_tokens.iter_mut() {
+        //         if let Some(values) = mvr_resolver.token_to_names.get(token) {
+        //             for v in values {
+        //                 if let Some(aa) = resolved_names.resolution.get(v) {
+        //                     *token = token.replace(v, &aa.package_id);
+        //                 }
+        //             }
+        //         }
+        //
+        //         if let Some(values) = mvr_resolver.token_to_types.get(token) {
+        //             for v in values {
+        //                 if let Some(aa) = resolved_types.resolution.get(v) {
+        //                     *token = token.replace(v, &aa.type_tag);
+        //                 }
+        //             }
+        //         }
+        //     }
+        //
+        //     println!("New tokens: {new_tokens:?}");
+        // }
+        //
         // Tokenize and parse to get the program
         let (program, program_metadata) =
             match ProgramParser::new(new_tokens.iter().map(|s| s.as_str()))

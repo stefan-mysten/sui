@@ -337,6 +337,13 @@ impl<'a, I: Iterator<Item = &'a str>> ProgramParser<'a, I> {
         use Lexeme as L;
         use Token as T;
 
+        println!("self: {:?}", self.tokens.peek());
+
+        if let sp!(_, L(T::At, _)) = self.peek() {
+            println!("Test");
+            self.parse_module_access()?;
+        }
+
         let function = self.parse_module_access()?;
         let mut end_sp = function.span;
 
@@ -416,7 +423,10 @@ impl<'a, I: Iterator<Item = &'a str>> ProgramParser<'a, I> {
                 self.parse_number(sp.wrap(&number))?
             }
 
-            L(T::At, _) => self.parse_address_literal()?.map(V::Address),
+            L(T::At, _) => match self.parse_address_literal() {
+                Ok(a) => a.map(V::Address),
+                Err(e) => self.parse_module_access(),
+            },
 
             L(T::Ident, A::NONE) => {
                 self.bump();
@@ -643,16 +653,46 @@ impl<'a, I: Iterator<Item = &'a str>> ProgramParser<'a, I> {
         })
     }
 
-    /// Parse a numerical or named address.
+    fn parse_mvr_address(&mut self, prefix: Option<&str>) -> PTBResult<Spanned<ParsedAddress>> {
+        use Lexeme as L;
+        use Token as T;
+
+        let mut address = String::new();
+        if let Some(prefix) = prefix {
+            address.push_str(prefix);
+        }
+        let start_sp = self.peek().span;
+        let mut token = self.peek();
+
+        println!("Hello parse mvr: {:?}", token);
+
+        while let sp!(_, L(T::ColonColon, _)) = token {
+            address.push_str(token.value.1);
+            self.bump();
+            token = self.peek();
+        }
+
+        println!("Address: {:?}", address);
+
+        let end_sp = self.peek().span;
+        Ok(start_sp.widen(end_sp).wrap(ParsedAddress::Named(address)))
+    }
+
+    /// Parse a numerical, named address, or mvr address.
     fn parse_address(&mut self) -> PTBResult<Spanned<ParsedAddress>> {
         use Lexeme as L;
         use Token as T;
 
         let sp!(sp, lexeme) = self.peek();
         let addr = match lexeme {
+            L(T::At, _) => self.parse_mvr_address(None)?.value,
             L(T::Ident, name) => {
                 self.bump();
-                ParsedAddress::Named(name.to_owned())
+                if let sp!(_, L(T::At | T::Dot, _)) = self.peek() {
+                    self.parse_mvr_address(Some(name))?.value
+                } else {
+                    ParsedAddress::Named(name.to_owned())
+                }
             }
 
             L(T::Number, number) => {

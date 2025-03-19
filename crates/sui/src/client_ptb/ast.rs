@@ -160,6 +160,7 @@ pub enum Argument {
     Identifier(String),
     VariableAccess(Spanned<String>, Vec<Spanned<String>>),
     Address(NumericalAddress),
+    MvrAddress(ParsedAddress),
     String(String),
     Vector(Vec<Spanned<Argument>>),
     Option(Spanned<Option<Box<Argument>>>),

@@ -234,10 +234,11 @@ async fn mvr_req_url(read_api: &ReadApi) -> Result<(&'static str, &'static str),
 }
 
 fn extract_name_for_resolver(input: &str) -> Option<String> {
-    Regex::new(r"((?:.*\.sui.*|@.*)?)(?=:)")
-        .unwrap()
-        .find(input)
-        .map(|x| x.as_str().to_string())
+    // Regex::new(r"((?:.*\.sui.*|@.*)?)(?=:)")
+    //     .unwrap()
+    //     .find(input)
+    //     .map(|x| x.as_str().to_string())
+    None
 }
 
 fn extract_types_for_resolver(input: &str) -> BTreeSet<String> {
@@ -266,6 +267,7 @@ mod tests {
             "<0x1::coin::Coin<0x2::sui::SUI>>", // ignored type tag
             "<0x1::coin::Coin<test.sui/pkg/1::module::type>>", // type tag with sui.test/pkg/1
             // version
+            // @test === test.sui/pkg/1
             "test.sui/pkg::module::function",     // package name
             "test.sui/pkg::module::function<u8>", // package name
             "test.sui/pkg::module::function<u8, @mvr/pkg::module::TYPE>", // package name
