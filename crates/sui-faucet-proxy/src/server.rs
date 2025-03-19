@@ -1,52 +1,26 @@
 // Copyright (c) Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::{
-    app_state, requests_manager::RequestsManager, AppState, FaucetConfig, FaucetError,
-    FaucetRequest, RequestMetricsLayer,
-};
+use crate::{AppState, FaucetConfig, FaucetError, FaucetRequest};
 use axum::{
-    error_handling::HandleErrorLayer,
-    extract::{ConnectInfo, Host},
-    http::{header::HeaderMap, StatusCode},
-    response::{IntoResponse, Redirect, Response},
-    routing::{get, post},
+    error_handling::HandleErrorLayer, http::StatusCode, response::IntoResponse, routing::post,
     BoxError, Extension, Json, Router,
 };
-use fastcrypto::encoding::{Base64, Encoding};
-use http::{header::CONTENT_TYPE, Method};
+use http::Method;
 use mysten_metrics::spawn_monitored_task;
-use prometheus::Registry;
 use serde::{Deserialize, Serialize};
 use std::{
     borrow::Cow,
     net::{IpAddr, SocketAddr},
     path::PathBuf,
-    str::FromStr,
     sync::Arc,
     time::Duration,
 };
-use sui_config::{sui_config_dir, SUI_CLIENT_CONFIG, SUI_KEYSTORE_FILENAME};
-use sui_sdk::{
-    rpc_types::{SuiObjectRef, SuiTransactionBlockEffects, SuiTransactionBlockEffectsAPI},
-    types::{
-        base_types::{ObjectID, SuiAddress},
-        transaction::TransactionData,
-    },
-    wallet_context::WalletContext,
-};
+use sui_config::SUI_CLIENT_CONFIG;
+use sui_sdk::wallet_context::WalletContext;
 use tower::ServiceBuilder;
-use tower_governor::{
-    governor::GovernorConfigBuilder, key_extractor::GlobalKeyExtractor, GovernorLayer,
-};
 use tower_http::cors::{Any, CorsLayer};
-use tracing::{error, info, warn};
-
-use anyhow::ensure;
-use once_cell::sync::Lazy;
-use serde_json::json;
-use shared_crypto::intent::Intent;
-use sui_keys::keystore::{AccountKeystore, FileBasedKeystore};
+use tracing::{info, warn};
 
 /// basic handler that responds with a static string
 async fn health() -> &'static str {
@@ -153,14 +127,13 @@ async fn handle_error(error: BoxError) -> impl IntoResponse {
 
 /// Start a faucet that is run locally. This should only be used for starting a local network, and
 /// not for devnet/testnet deployments!
-async fn start_faucet(
+pub async fn start_faucet(
     app_state: Arc<AppState>,
-    prometheus_registry: &Registry,
 ) -> Result<(), anyhow::Error> {
-   let cors = CorsLayer::new()
-.allow_methods(vec![Method::GET, Method::POST])
-.allow_headers(Any)
-.allow_origin(Any);
+    let cors = CorsLayer::new()
+        .allow_methods(vec![Method::GET, Method::POST])
+        .allow_headers(Any)
+        .allow_origin(Any);
     let FaucetConfig { port, host_ip, .. } = app_state.config;
 
     println!("Starting in local mode");
@@ -170,7 +143,6 @@ async fn start_faucet(
         .layer(
             ServiceBuilder::new()
                 .layer(HandleErrorLayer::new(handle_error))
-                .layer(RequestMetricsLayer::new(prometheus_registry))
                 .load_shed()
                 .layer(Extension(app_state.clone()))
                 .layer(cors)

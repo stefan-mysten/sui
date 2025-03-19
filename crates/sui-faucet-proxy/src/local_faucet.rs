@@ -1,8 +1,5 @@
-// Copyright (c) Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
-
-use crate::{metrics::FaucetMetrics, FaucetError};
-use prometheus::Registry;
+use crate::FaucetError;
 use std::sync::Arc;
 use std::{collections::VecDeque, fmt};
 use sui_sdk::{
@@ -28,7 +25,6 @@ pub struct LocalFaucet {
     wallet: WalletContext,
     active_address: SuiAddress,
     coin_id: ObjectID,
-    pub metrics: FaucetMetrics,
     coin_amount: u64,
     num_coins: usize,
     local_queue: Mutex<VecDeque<SuiAddress>>,
@@ -48,23 +44,16 @@ impl fmt::Debug for LocalFaucet {
 impl LocalFaucet {
     pub async fn new(
         mut wallet: WalletContext,
-        prometheus_registry: &Registry,
         config: FaucetConfig,
     ) -> Result<Arc<Self>, FaucetError> {
         let (coins, active_address) = find_gas_coins_and_address(&mut wallet, &config).await?;
         info!("Starting faucet with address: {:?}", active_address);
-
-        let metrics = FaucetMetrics::new(prometheus_registry);
-        // set initial balance when faucet starts
-        let balance = coins.iter().map(|coin| coin.0.balance.value()).sum::<u64>();
-        metrics.balance.set(balance as i64);
 
         let local_queue = Mutex::new(VecDeque::new());
 
         Ok(Arc::new(LocalFaucet {
             wallet,
             active_address,
-            metrics,
             local_queue,
             coin_id: *coins[0].id(),
             coin_amount: config.amount,
@@ -81,7 +70,7 @@ impl LocalFaucet {
         let mut queue = self.local_queue.lock().await;
 
         let gas_price = self.wallet.get_reference_gas_price().await.map_err(|e| {
-            FaucetError::internal(format!("Failed to get gas price: {}", e.to_string()))
+            FaucetError::internal(format!("Failed to get gas price: {}", e))
         })?;
 
         let queue_size = queue.len();
@@ -107,7 +96,7 @@ impl LocalFaucet {
             .get_object_ref(self.coin_id)
             .await
             .map_err(|e| {
-                FaucetError::internal(format!("Failed to get object ref: {}", e.to_string()))
+                FaucetError::internal(format!("Failed to get object ref: {}", e))
             })?;
         let tx_data = TransactionData::new_programmable(
             self.active_address,
@@ -134,11 +123,6 @@ impl LocalFaucet {
             .sign_secure(&self.active_address, &tx_data, Intent::sui_transaction())
             .map_err(FaucetError::internal)?;
         let tx = Transaction::from_data(tx_data.clone(), vec![signature]);
-
-        self.metrics.current_executions_in_flight.inc();
-        let _metrics_guard = scopeguard::guard(self.metrics.clone(), |metrics| {
-            metrics.current_executions_in_flight.dec();
-        });
 
         let client = self.wallet.get_client().await?;
 
