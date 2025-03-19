@@ -7,7 +7,6 @@ mod faucet_config;
 mod local_faucet;
 mod metrics;
 mod requests;
-mod requests_manager;
 mod server;
 
 pub mod metrics_layer;

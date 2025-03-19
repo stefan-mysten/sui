@@ -30,22 +30,12 @@ async fn main() -> Result<(), anyhow::Error> {
 
     let context = create_wallet_context(wallet_client_timeout_secs, sui_config_dir()?)?;
 
-    let max_concurrency = match env::var("MAX_CONCURRENCY") {
-        Ok(val) => val.parse::<usize>().unwrap(),
-        _ => CONCURRENCY_LIMIT,
-    };
-    info!("Max concurrency: {max_concurrency}.");
-
     let prom_binding = PROM_PORT_ADDR.parse().unwrap();
     info!("Starting Prometheus HTTP endpoint at {}", prom_binding);
     let registry_service = mysten_metrics::start_prometheus_server(prom_binding);
     let prometheus_registry = registry_service.default_registry();
     prometheus_registry
-        .register(mysten_metrics::uptime_metric(
-            "faucet-proxy",
-            VERSION,
-            "unknown",
-        ))
+        .register(mysten_metrics::uptime_metric("faucet", VERSION, "unknown"))
         .unwrap();
 
     let app_state = Arc::new(AppState {
@@ -55,5 +45,5 @@ async fn main() -> Result<(), anyhow::Error> {
         config,
     });
 
-    start_faucet(app_state, max_concurrency, &prometheus_registry).await
+    start_faucet(app_state,&prometheus_registry).await
 }

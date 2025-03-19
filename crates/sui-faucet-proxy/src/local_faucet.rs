@@ -3,8 +3,6 @@
 
 use crate::{metrics::FaucetMetrics, FaucetError};
 use prometheus::Registry;
-#[cfg(test)]
-use std::collections::HashSet;
 use std::sync::Arc;
 use std::{collections::VecDeque, fmt};
 use sui_sdk::{
@@ -15,6 +13,7 @@ use sui_sdk::{
 use crate::FaucetConfig;
 use shared_crypto::intent::Intent;
 use sui_keys::keystore::AccountKeystore;
+use sui_sdk::types::programmable_transaction_builder::ProgrammableTransactionBuilder;
 use sui_sdk::types::{
     base_types::{ObjectID, SuiAddress},
     gas_coin::GasCoin,
@@ -30,7 +29,6 @@ pub struct LocalFaucet {
     active_address: SuiAddress,
     coin_id: ObjectID,
     pub metrics: FaucetMetrics,
-    ttl_expiration: u64,
     coin_amount: u64,
     num_coins: usize,
     local_queue: Mutex<VecDeque<SuiAddress>>,
@@ -42,7 +40,6 @@ impl fmt::Debug for LocalFaucet {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("SimpleFaucet")
             .field("faucet_wallet", &self.active_address)
-            .field("ttl_expiration", &self.ttl_expiration)
             .field("coin_amount", &self.coin_amount)
             .finish()
     }
@@ -68,7 +65,6 @@ impl LocalFaucet {
             wallet,
             active_address,
             metrics,
-            ttl_expiration: config.ttl_expiration,
             local_queue,
             coin_id: *coins[0].id(),
             coin_amount: config.amount,
@@ -96,8 +92,7 @@ impl LocalFaucet {
             queue.drain(0..queue_size)
         };
 
-        let mut ptb =
-            sui_sdk::types::programmable_transaction_builder::ProgrammableTransactionBuilder::new();
+        let mut ptb = ProgrammableTransactionBuilder::new();
         for recipient in addresses {
             let recipients = vec![recipient; self.num_coins];
             let amounts = vec![self.coin_amount; recipients.len()];
