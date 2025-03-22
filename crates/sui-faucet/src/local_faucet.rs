@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 use crate::FaucetError;
+use std::fmt;
 use std::sync::Arc;
-use std::{collections::VecDeque, fmt};
 use sui_sdk::{
     rpc_types::{SuiTransactionBlockResponse, SuiTransactionBlockResponseOptions},
     types::quorum_driver_types::ExecuteTransactionRequestType,
@@ -17,9 +17,10 @@ use sui_sdk::types::{
     transaction::{Transaction, TransactionData},
 };
 use sui_sdk::wallet_context::WalletContext;
-use tokio::sync::Mutex;
 use tokio::time::Duration;
 use tracing::info;
+
+const GAS_BUDGET: u64 = 10000000;
 
 pub struct LocalFaucet {
     wallet: WalletContext,
@@ -27,7 +28,6 @@ pub struct LocalFaucet {
     coin_id: ObjectID,
     coin_amount: u64,
     num_coins: usize,
-    local_queue: Mutex<VecDeque<SuiAddress>>,
 }
 
 /// We do not just derive(Debug) because WalletContext and the WriteAheadLog do not implement Debug / are also hard
@@ -49,45 +49,28 @@ impl LocalFaucet {
         let (coins, active_address) = find_gas_coins_and_address(&mut wallet, &config).await?;
         info!("Starting faucet with address: {:?}", active_address);
 
-        let local_queue = Mutex::new(VecDeque::new());
-
         Ok(Arc::new(LocalFaucet {
             wallet,
             active_address,
-            local_queue,
             coin_id: *coins[0].id(),
             coin_amount: config.amount,
             num_coins: config.num_coins,
         }))
     }
 
-    pub async fn local_request_add_to_queue(&self, recipient: SuiAddress) {
-        let mut queue = self.local_queue.lock().await;
-        queue.push_back(recipient);
-    }
-
-    pub async fn local_request_execute_tx(&self) -> Result<(), FaucetError> {
-        let mut queue = self.local_queue.lock().await;
-
-        let gas_price = self.wallet.get_reference_gas_price().await.map_err(|e| {
-            FaucetError::internal(format!("Failed to get gas price: {}", e))
-        })?;
-
-        let queue_size = queue.len();
-
-        let addresses = if queue_size > 100 {
-            queue.drain(0..100)
-        } else {
-            queue.drain(0..queue_size)
-        };
+    /// Make transaction and execute it.
+    pub async fn local_request_execute_tx(&self, recipient: SuiAddress) -> Result<(), FaucetError> {
+        let gas_price = self
+            .wallet
+            .get_reference_gas_price()
+            .await
+            .map_err(|e| FaucetError::internal(format!("Failed to get gas price: {}", e)))?;
 
         let mut ptb = ProgrammableTransactionBuilder::new();
-        for recipient in addresses {
-            let recipients = vec![recipient; self.num_coins];
-            let amounts = vec![self.coin_amount; recipients.len()];
-            ptb.pay_sui(recipients, amounts.to_vec())
-                .map_err(FaucetError::internal)?;
-        }
+        let recipients = vec![recipient; self.num_coins];
+        let amounts = vec![self.coin_amount; recipients.len()];
+        ptb.pay_sui(recipients, amounts.to_vec())
+            .map_err(FaucetError::internal)?;
 
         let ptb = ptb.finish();
 
@@ -95,14 +78,12 @@ impl LocalFaucet {
             .wallet
             .get_object_ref(self.coin_id)
             .await
-            .map_err(|e| {
-                FaucetError::internal(format!("Failed to get object ref: {}", e))
-            })?;
+            .map_err(|e| FaucetError::internal(format!("Failed to get object ref: {}", e)))?;
         let tx_data = TransactionData::new_programmable(
             self.active_address,
             vec![coin_id_ref],
             ptb,
-            50000000,
+            GAS_BUDGET,
             gas_price,
         );
 

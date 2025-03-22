@@ -6,7 +6,7 @@ A basic faucet that is intended to be run locally. It does not support heavy loa
 
 **Prerequisites**
 
-You need to have a key with SUI.
+You need to have a key with sufficient SUI.
 
 **Starting the faucet as a standalone service**
 

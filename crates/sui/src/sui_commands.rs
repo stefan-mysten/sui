@@ -32,8 +32,7 @@ use sui_config::{
 use sui_config::{
     SUI_BENCHMARK_GENESIS_GAS_KEYSTORE_FILENAME, SUI_GENESIS_FILENAME, SUI_KEYSTORE_FILENAME,
 };
-// use sui_faucet::{create_wallet_context, start_faucet, AppState, FaucetConfig, SimpleFaucet};
-use sui_faucet_proxy::{create_wallet_context, start_faucet, AppState, FaucetConfig, LocalFaucet};
+use sui_faucet::{create_wallet_context, start_faucet, AppState, FaucetConfig, LocalFaucet};
 use sui_indexer::test_utils::{
     start_indexer_jsonrpc_for_testing, start_indexer_writer_for_testing,
 };
@@ -909,7 +908,6 @@ async fn start(
         let config = FaucetConfig {
             host_ip,
             port: faucet_address.port(),
-            local: true,
             amount: DEFAULT_FAUCET_MIST_AMOUNT,
             num_coins: DEFAULT_FAUCET_NUM_COINS,
             ..Default::default()
@@ -940,7 +938,6 @@ async fn start(
 
         let local_faucet = LocalFaucet::new(
             create_wallet_context(config.wallet_client_timeout_secs, config_dir.clone())?,
-            &prometheus_registry,
             config.clone(),
         )
         .await?;
@@ -950,7 +947,7 @@ async fn start(
             config,
         });
 
-        start_faucet(app_state, CONCURRENCY_LIMIT, &prometheus_registry).await?;
+        start_faucet(app_state).await?;
     }
 
     let mut interval = tokio::time::interval(std::time::Duration::from_secs(3));
