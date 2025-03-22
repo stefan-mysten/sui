@@ -7,7 +7,9 @@ use crate::{
         ast::{Argument as PTBArg, ASSIGN, GAS_BUDGET},
         error::{PTBError, PTBResult, Span, Spanned},
     },
-    err, error, sp,
+    err, error,
+    mvr_resolver::{resolve_mvr_name, resolve_mvr_type},
+    sp,
 };
 use anyhow::Result;
 use async_recursion::async_recursion;
@@ -19,6 +21,7 @@ use move_binary_format::{
 use move_core_types::parsing::{
     address::{NumericalAddress, ParsedAddress},
     parser::NumberFormat,
+    types::{ParsedFqName, ParsedModuleId, ParsedStructType, ParsedType},
 };
 use move_core_types::{
     account_address::AccountAddress, annotated_value::MoveTypeLayout, ident_str,
@@ -669,6 +672,7 @@ impl<'a> PTBBuilder<'a> {
                     Ok(self.resolved_arguments[&i])
                 }
             }
+            PTBArg::MvrAddress(a) => todo!(),
             // Lastly -- look to see if this is an address that has been either declared in scope,
             // or that is coming from an external source (e.g., the keystore).
             PTBArg::Identifier(i) if self.addresses.contains_key(&i) => {
@@ -885,29 +889,61 @@ impl<'a> PTBBuilder<'a> {
                 in_ty_args,
                 args,
             ) => {
-                let mut ty_args = vec![];
+                let parsed_address = address.value.clone();
+                // First try to see if this is a MVR name and then resolve it.
+                // If it is not, then we try to resolve it into an account address either by
+                // looking into the current addresses or it might be a named address (sui,
+                // deepbook, etc, which we can resolve without network access).
+                let resolved_address = match parsed_address {
+                    ParsedAddress::Named(name) if is_mvr_name(&name) => {
+                        let resolved_address =
+                            resolve_mvr_name(&name, self.reader)
+                                .await
+                                .map_err(|e| PTBError {
+                                    message: format!("Unable to resolve MVR name '{name}': {e}"),
+                                    span: address.span,
+                                    help: None,
+                                    severity: Severity::Error,
+                                })?;
+                        println!(
+                            "Resolved MVR address: {name} {:?}",
+                            resolved_address.package_id
+                        );
+                        AccountAddress::from_hex_literal(&resolved_address.package_id).map_err(
+                            |e| {
+                                err!(
+                                    address.span,
+                                    "Unable to parse package id into an AccountAddress: {e}"
+                                )
+                            },
+                        )?
+                    }
+                    x => {
+                        let address =  x.into_account_address(&|s| {self.addresses.get(s).cloned().or_else(|| resolve_address(s))}).map_err(|e| {
+                            let e = err!(address.span, "{e}");
+                            if let ParsedAddress::Named(name) = address.value {
+                                e.with_help(
+                                    format!("This is most likely because the named address '{name}' is not in scope. \
+                                             You can either bind a variable to the address that you want to use or use the address in the command."))
+                            } else {
+                                e
+                            }
+                        })?;
+                        address
+                    }
+                };
 
+                let mut ty_args = vec![];
                 if let Some(sp!(ty_loc, in_ty_args)) = in_ty_args {
-                    for t in in_ty_args.into_iter() {
+                    let new_typetags =
+                        resolve_possible_mvr_name_in_typetag(in_ty_args, self.reader).await;
+                    for t in new_typetags.into_iter() {
                         ty_args.push(
                             t.into_type_tag(&resolve_address)
                                 .map_err(|e| err!(ty_loc, "{e}"))?,
                         )
                     }
                 }
-
-                let resolved_address = address.value.clone().into_account_address(&|s| {
-                    self.addresses.get(s).cloned().or_else(|| resolve_address(s))
-                }).map_err(|e| {
-                    let e = err!(address.span, "{e}");
-                    if let ParsedAddress::Named(name) = address.value {
-                        e.with_help(
-                            format!("This is most likely because the named address '{name}' is not in scope. \
-                                     You can either bind a variable to the address that you want to use or use the address in the command."))
-                    } else {
-                        e
-                    }
-                })?;
 
                 let package_id = ObjectID::from_address(resolved_address);
                 let package = self.resolve_to_package(package_id, address.span).await?;
@@ -1190,3 +1226,82 @@ fn edit_distance(a: &str, b: &str) -> usize {
 
     cache[a.len()][b.len()]
 }
+
+/// Check if it's a MVR name. MVR names must contain a / in them so as we already
+/// parsed the name, we can just check if it contains a / in it. A keystore alias cannot
+/// contain a slash, and similarly a numerical address or named address cannot have a / in it.
+pub fn is_mvr_name(name: &str) -> bool {
+    name.contains('/') && (name.contains("@") || name.contains(".sui"))
+}
+
+pub async fn resolve_possible_mvr_name_in_typetag(
+    typetag: Vec<ParsedType>,
+    read_api: &ReadApi,
+) -> Vec<ParsedType> {
+    let mut new_typetag = vec![];
+    for t in typetag {
+        match t {
+            ParsedType::Struct(ParsedStructType {
+                ref fq_name,
+                type_args: _,
+            }) => {
+                let address = fq_name.module.address.clone();
+                if let ParsedAddress::Named(name) = address {
+                    if is_mvr_name(&name) {
+                        let resolved = resolve_mvr_type(&to_string_recursive(t), read_api)
+                            .await
+                            .unwrap();
+                        new_typetag.push(ParsedType::parse(&resolved.type_tag).unwrap());
+                    }
+                }
+            }
+            _ => new_typetag.push(t),
+        }
+    }
+    new_typetag
+}
+
+pub fn to_string_recursive(parsed_type: ParsedType) -> String {
+    match parsed_type {
+        ParsedType::U8 => "u8".to_string(),
+        ParsedType::U16 => "u16".to_string(),
+        ParsedType::U32 => "u32".to_string(),
+        ParsedType::U64 => "u64".to_string(),
+        ParsedType::U128 => "u128".to_string(),
+        ParsedType::U256 => "u256".to_string(),
+        ParsedType::Bool => "bool".to_string(),
+        ParsedType::Address => "address".to_string(),
+        ParsedType::Signer => "signer".to_string(),
+        ParsedType::Vector(inner) => format!("vector<{}>", to_string_recursive(*inner)),
+        ParsedType::Struct(s) => {
+            let mut result = format_fqname(&s.fq_name);
+            if !s.type_args.is_empty() {
+                result.push('<');
+                for (i, arg) in s.type_args.iter().enumerate() {
+                    if i > 0 {
+                        result.push_str(", ");
+                    }
+                    result.push_str(&to_string_recursive(arg.clone()));
+                }
+                result.push('>');
+            }
+            result
+        }
+    }
+}
+
+fn format_address(addr: &ParsedAddress) -> String {
+    match addr {
+        ParsedAddress::Numerical(addr) => addr.to_string(),
+        ParsedAddress::Named(name) => name.clone(),
+    }
+}
+
+fn format_module_id(module: &ParsedModuleId) -> String {
+    format!("{}::{}", format_address(&module.address), module.name)
+}
+
+fn format_fqname(fqname: &ParsedFqName) -> String {
+    format!("{}::{}", format_module_id(&fqname.module), fqname.name)
+}
+

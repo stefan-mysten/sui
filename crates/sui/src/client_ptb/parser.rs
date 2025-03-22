@@ -13,7 +13,7 @@ use sui_types::{base_types::ObjectID, Identifier};
 use crate::{
     client_ptb::{
         ast::{all_keywords, COMMANDS},
-        builder::{display_did_you_mean, find_did_you_means},
+        builder::{display_did_you_mean, find_did_you_means, is_mvr_name},
     },
     err, error, sp,
 };
@@ -337,13 +337,6 @@ impl<'a, I: Iterator<Item = &'a str>> ProgramParser<'a, I> {
         use Lexeme as L;
         use Token as T;
 
-        println!("self: {:?}", self.tokens.peek());
-
-        if let sp!(_, L(T::At, _)) = self.peek() {
-            println!("Test");
-            self.parse_module_access()?;
-        }
-
         let function = self.parse_module_access()?;
         let mut end_sp = function.span;
 
@@ -425,7 +418,9 @@ impl<'a, I: Iterator<Item = &'a str>> ProgramParser<'a, I> {
 
             L(T::At, _) => match self.parse_address_literal() {
                 Ok(a) => a.map(V::Address),
-                Err(e) => self.parse_module_access(),
+                Err(e) => {
+                    todo!()
+                }
             },
 
             L(T::Ident, A::NONE) => {
@@ -496,7 +491,7 @@ impl<'a, I: Iterator<Item = &'a str>> ProgramParser<'a, I> {
                 sp.wrap(ParsedType::Vector(Box::new(ty)))
             }
 
-            L(T::Ident | T::Number | T::HexNumber, _) => 'fq: {
+            L(T::At | T::Ident | T::Number | T::HexNumber, _) => 'fq: {
                 let sp!(_, module_access) = self.parse_module_access()?;
                 let sp!(_, address) = module_access.address;
                 let sp!(_, module_name) = module_access.module_name;
@@ -512,6 +507,7 @@ impl<'a, I: Iterator<Item = &'a str>> ProgramParser<'a, I> {
 
                 let sp!(_, L(T::LAngle, _)) = self.peek() else {
                     let sp = sp.widen(fun_sp);
+                    println!("fq_name: {:?}", fq_name);
                     break 'fq sp.wrap(ParsedType::Struct(ParsedStructType {
                         fq_name,
                         type_args: vec![],
@@ -520,6 +516,7 @@ impl<'a, I: Iterator<Item = &'a str>> ProgramParser<'a, I> {
 
                 let sp!(tys_sp, type_args) = self.parse_type_args()?;
 
+                println!("type args {:?}", type_args);
                 let sp = sp.widen(tys_sp);
                 sp.wrap(ParsedType::Struct(ParsedStructType { fq_name, type_args }))
             }
@@ -666,7 +663,10 @@ impl<'a, I: Iterator<Item = &'a str>> ProgramParser<'a, I> {
 
         println!("Hello parse mvr: {:?}", token);
 
-        while let sp!(_, L(T::ColonColon, _)) = token {
+        loop {
+            if let sp!(_, L(T::ColonColon, _)) = token {
+                break;
+            }
             address.push_str(token.value.1);
             self.bump();
             token = self.peek();
@@ -683,6 +683,7 @@ impl<'a, I: Iterator<Item = &'a str>> ProgramParser<'a, I> {
         use Lexeme as L;
         use Token as T;
 
+        println!("Parse address: {:?}", self.peek());
         let sp!(sp, lexeme) = self.peek();
         let addr = match lexeme {
             L(T::At, _) => self.parse_mvr_address(None)?.value,

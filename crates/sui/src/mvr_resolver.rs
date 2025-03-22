@@ -233,6 +233,52 @@ async fn mvr_req_url(read_api: &ReadApi) -> Result<(&'static str, &'static str),
     }
 }
 
+pub async fn resolve_mvr_name(name: &str, read_api: &ReadApi) -> Result<PackageId, Error> {
+    let request = reqwest::Client::new();
+    let (url, chain) = mvr_req_url(read_api).await?;
+    let json_body = json!(NamesRequest {
+        names: BTreeSet::from([name.to_string()])
+    });
+    let response = request
+        .post(format!("{url}/v1/resolution/bulk"))
+        .header("Content-Type", "application/json")
+        .json(&json_body)
+        .send()
+        .await?;
+
+    let resolved_addresses: ResolvedNames = response.json().await?;
+
+    resolved_addresses
+        .resolution
+        .into_values()
+        .next()
+        .ok_or_else(|| {
+            anyhow::anyhow!("Could not find package id for {name} for {chain} environment")
+        })
+}
+
+pub async fn resolve_mvr_type(name: &str, read_api: &ReadApi) -> Result<TypeTagContainer, Error> {
+    let request = reqwest::Client::new();
+    let (url, chain) = mvr_req_url(read_api).await?;
+    let json_body = json!(TypesRequest {
+        types: BTreeSet::from([name.to_string()])
+    });
+    let response = request
+        .post(format!("{url}/v1/type-resolution/bulk"))
+        .header("Content-Type", "application/json")
+        .json(&json_body)
+        .send()
+        .await?;
+
+    let resolved_types: ResolvedTypes = response.json().await?;
+
+    resolved_types
+        .resolution
+        .into_values()
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("Could not find type id for {name} for {chain} environment"))
+}
+
 fn extract_name_for_resolver(input: &str) -> Option<String> {
     // Regex::new(r"((?:.*\.sui.*|@.*)?)(?=:)")
     //     .unwrap()

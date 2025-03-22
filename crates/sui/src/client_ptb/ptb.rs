@@ -68,6 +68,8 @@ impl PTB {
             }
         }
 
+        println!("Tokens: {:?}", tokens);
+
         // Before parsing stage, resolve any MVR style packages
         let mut new_tokens = tokens.clone().map(String::from).collect::<Vec<String>>();
         let mvr_resolver = MvrResolver::from_tokens(tokens.clone()).map_err(|e| anyhow!(e))?;
@@ -256,7 +258,7 @@ impl PTB {
         Ok(())
     }
 
-    /// Exposed for testing
+    // Also used in testing, thus public
     pub async fn build_ptb(
         program: Program,
         context: &WalletContext,
@@ -276,7 +278,7 @@ impl PTB {
         builder.build(program).await
     }
 
-    /// Exposed for testing
+    // Also used in testing, thus public
     pub fn parse_ptb_commands(args: Vec<String>) -> Result<ParsedProgram, Vec<PTBError>> {
         ProgramParser::new(args.iter().map(|s| s.as_str()))
             .map_err(|e| vec![e])

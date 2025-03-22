@@ -297,6 +297,7 @@ impl Argument {
             Argument::Identifier(_) | Argument::VariableAccess(_, _) | Argument::Gas => {
                 error!(loc, "Unable to convert '{self}' to non-object value.")
             }
+            Argument::MvrAddress(parsed_address) => todo!(),
         })
     }
 
@@ -363,6 +364,7 @@ impl fmt::Display for Argument {
                 Some(v) => write!(f, "some({v})"),
                 None => write!(f, "none"),
             },
+            Argument::MvrAddress(parsed_address) => todo!(),
         }
     }
 }
