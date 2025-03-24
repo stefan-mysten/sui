@@ -892,7 +892,7 @@ impl<'a> PTBBuilder<'a> {
                 let parsed_address = address.value.clone();
                 // First try to see if this is a MVR name and then resolve it.
                 // If it is not, then we try to resolve it into an account address either by
-                // looking into the current addresses or it might be a named address (sui,
+                // looking into the current keystore addresses or it might be a named address (sui,
                 // deepbook, etc, which we can resolve without network access).
                 let resolved_address = match parsed_address {
                     ParsedAddress::Named(name) if is_mvr_name(&name) => {
@@ -909,17 +909,19 @@ impl<'a> PTBBuilder<'a> {
                             "Resolved MVR address: {name} {:?}",
                             resolved_address.package_id
                         );
-                        AccountAddress::from_hex_literal(&resolved_address.package_id).map_err(
-                            |e| {
-                                err!(
-                                    address.span,
-                                    "Unable to parse package id into an AccountAddress: {e}"
-                                )
-                            },
-                        )?
+                        let account_address =
+                            AccountAddress::from_hex_literal(&resolved_address.package_id)
+                                .map_err(|e| {
+                                    err!(
+                                        address.span,
+                                        "Unable to parse package id into an AccountAddress: {e}"
+                                    )
+                                })?;
+                        self.addresses.insert(name, account_address);
+                        account_address
                     }
-                    x => {
-                        let address =  x.into_account_address(&|s| {self.addresses.get(s).cloned().or_else(|| resolve_address(s))}).map_err(|e| {
+                    other => {
+                        let address =  other.into_account_address(&|s| {self.addresses.get(s).cloned().or_else(|| resolve_address(s))}).map_err(|e| {
                             let e = err!(address.span, "{e}");
                             if let ParsedAddress::Named(name) = address.value {
                                 e.with_help(
@@ -935,9 +937,9 @@ impl<'a> PTBBuilder<'a> {
 
                 let mut ty_args = vec![];
                 if let Some(sp!(ty_loc, in_ty_args)) = in_ty_args {
-                    let new_typetags =
-                        resolve_possible_mvr_name_in_typetag(in_ty_args, self.reader).await;
-                    for t in new_typetags.into_iter() {
+                    // let new_typetags =
+                    // resolve_possible_mvr_name_in_typetag(in_ty_args, self.reader).await;
+                    for t in in_ty_args.into_iter() {
                         ty_args.push(
                             t.into_type_tag(&resolve_address)
                                 .map_err(|e| err!(ty_loc, "{e}"))?,
@@ -1304,4 +1306,3 @@ fn format_module_id(module: &ParsedModuleId) -> String {
 fn format_fqname(fqname: &ParsedFqName) -> String {
     format!("{}::{}", format_module_id(&fqname.module), fqname.name)
 }
-
