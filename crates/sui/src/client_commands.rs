@@ -2702,6 +2702,9 @@ pub async fn request_tokens_from_faucet(
         StatusCode::SERVICE_UNAVAILABLE => {
             bail!("Faucet service is currently overloaded or unavailable. Please try again later.");
         }
+        StatusCode::OK => {
+            println!("Request successful. It can take up to 1 minute to get the coin. Run sui client gas to check your gas coins.");
+        }
         status_code => {
             bail!("Faucet request was unsuccessful: {status_code}");
         }
