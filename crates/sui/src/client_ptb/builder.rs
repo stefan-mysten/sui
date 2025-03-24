@@ -18,13 +18,16 @@ use miette::Severity;
 use move_binary_format::{
     binary_config::BinaryConfig, file_format::SignatureToken, CompiledModule,
 };
-use move_core_types::parsing::{
-    address::{NumericalAddress, ParsedAddress},
-    parser::NumberFormat,
-    types::{ParsedFqName, ParsedModuleId, ParsedStructType, ParsedType},
-};
 use move_core_types::{
     account_address::AccountAddress, annotated_value::MoveTypeLayout, ident_str,
+};
+use move_core_types::{
+    language_storage::StructTag,
+    parsing::{
+        address::{NumericalAddress, ParsedAddress},
+        parser::NumberFormat,
+        types::{ParsedFqName, ParsedModuleId, ParsedStructType, ParsedType},
+    },
 };
 use move_package::BuildConfig as MoveBuildConfig;
 use std::{collections::BTreeMap, path::Path};
@@ -837,8 +840,8 @@ impl<'a> PTBBuilder<'a> {
                     .insert(i, ArgWithHistory::Unresolved(arg_w_loc));
             }
             ParsedPTBCommand::MakeMoveVec(sp!(ty_loc, ty_arg), sp!(_, args)) => {
-                let ty_arg = ty_arg
-                    .into_type_tag(&resolve_address)
+                let ty_arg = into_type_tag(ty_arg, &resolve_address, self.reader)
+                    .await
                     .map_err(|e| err!(ty_loc, "{e}"))?;
                 let mut vec_args: Vec<Tx::Argument> = vec![];
                 if is_primitive_type_tag(&ty_arg) {
@@ -896,29 +899,7 @@ impl<'a> PTBBuilder<'a> {
                 // deepbook, etc, which we can resolve without network access).
                 let resolved_address = match parsed_address {
                     ParsedAddress::Named(name) if is_mvr_name(&name) => {
-                        let resolved_address =
-                            resolve_mvr_name(&name, self.reader)
-                                .await
-                                .map_err(|e| PTBError {
-                                    message: format!("Unable to resolve MVR name '{name}': {e}"),
-                                    span: address.span,
-                                    help: None,
-                                    severity: Severity::Error,
-                                })?;
-                        println!(
-                            "Resolved MVR address: {name} {:?}",
-                            resolved_address.package_id
-                        );
-                        let account_address =
-                            AccountAddress::from_hex_literal(&resolved_address.package_id)
-                                .map_err(|e| {
-                                    err!(
-                                        address.span,
-                                        "Unable to parse package id into an AccountAddress: {e}"
-                                    )
-                                })?;
-                        self.addresses.insert(name, account_address);
-                        account_address
+                        resolve_mvr_to_account_address(name, Some(&address), &self.reader).await?
                     }
                     other => {
                         let address =  other.into_account_address(&|s| {self.addresses.get(s).cloned().or_else(|| resolve_address(s))}).map_err(|e| {
@@ -937,11 +918,10 @@ impl<'a> PTBBuilder<'a> {
 
                 let mut ty_args = vec![];
                 if let Some(sp!(ty_loc, in_ty_args)) = in_ty_args {
-                    // let new_typetags =
-                    // resolve_possible_mvr_name_in_typetag(in_ty_args, self.reader).await;
                     for t in in_ty_args.into_iter() {
                         ty_args.push(
-                            t.into_type_tag(&resolve_address)
+                            into_type_tag(t, &resolve_address, self.reader)
+                                .await
                                 .map_err(|e| err!(ty_loc, "{e}"))?,
                         )
                     }
@@ -1234,6 +1214,85 @@ fn edit_distance(a: &str, b: &str) -> usize {
 /// contain a slash, and similarly a numerical address or named address cannot have a / in it.
 pub fn is_mvr_name(name: &str) -> bool {
     name.contains('/') && (name.contains("@") || name.contains(".sui"))
+}
+
+pub async fn into_struct_tag(
+    parsed_struct_type: ParsedStructType,
+    mapping: &impl Fn(&str) -> Option<AccountAddress>,
+    reader: &ReadApi,
+) -> anyhow::Result<StructTag> {
+    let fq_name = parsed_struct_type.fq_name;
+    let type_args = parsed_struct_type.type_args;
+
+    let address = match fq_name.module.address {
+        ParsedAddress::Named(name) if is_mvr_name(&name) => {
+            resolve_mvr_to_account_address(name, None, reader)
+                .await
+                .map_err(|e| anyhow::anyhow!(e))
+        }
+        _ => fq_name.module.address.into_account_address(mapping),
+    }?;
+
+    Ok(StructTag {
+        address,
+        module: Identifier::new(fq_name.module.name)?,
+        name: Identifier::new(fq_name.name)?,
+        type_params: type_args
+            .into_iter()
+            .map(|t| t.into_type_tag(mapping))
+            .collect::<anyhow::Result<_>>()?,
+    })
+}
+
+#[async_recursion]
+pub async fn into_type_tag(
+    parsed_type: ParsedType,
+    mapping: &(impl Fn(&str) -> Option<AccountAddress> + std::marker::Sync),
+    reader: &ReadApi,
+) -> anyhow::Result<TypeTag> {
+    Ok(match parsed_type {
+        ParsedType::U8 => TypeTag::U8,
+        ParsedType::U16 => TypeTag::U16,
+        ParsedType::U32 => TypeTag::U32,
+        ParsedType::U64 => TypeTag::U64,
+        ParsedType::U128 => TypeTag::U128,
+        ParsedType::U256 => TypeTag::U256,
+        ParsedType::Bool => TypeTag::Bool,
+        ParsedType::Address => TypeTag::Address,
+        ParsedType::Signer => TypeTag::Signer,
+        ParsedType::Vector(inner) => {
+            TypeTag::Vector(Box::new(into_type_tag(*inner, mapping, reader).await?))
+        }
+        ParsedType::Struct(s) => {
+            TypeTag::Struct(Box::new(into_struct_tag(s, mapping, reader).await?))
+        }
+    })
+}
+
+async fn resolve_mvr_to_account_address(
+    name: String,
+    address: Option<&Spanned<ParsedAddress>>,
+    reader: &ReadApi,
+) -> PTBResult<AccountAddress> {
+    let span = if let Some(address) = address {
+        address.span
+    } else {
+        Span { start: 0, end: 0 }
+    };
+    let resolved_address = resolve_mvr_name(&name, reader)
+        .await
+        .map_err(|e| PTBError {
+            message: format!("Unable to resolve MVR name '{name}': {e}"),
+            span,
+            help: None,
+            severity: Severity::Error,
+        })?;
+    AccountAddress::from_hex_literal(&resolved_address.package_id).map_err(|e| {
+        err!(
+            span,
+            "Unable to parse package id into an AccountAddress: {e}"
+        )
+    })
 }
 
 pub async fn resolve_possible_mvr_name_in_typetag(
