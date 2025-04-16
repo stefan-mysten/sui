@@ -10,6 +10,7 @@ use sui_sdk::{
 };
 
 use crate::FaucetConfig;
+use anyhow::bail;
 use shared_crypto::intent::Intent;
 use sui_keys::keystore::AccountKeystore;
 use sui_sdk::types::programmable_transaction_builder::ProgrammableTransactionBuilder;
@@ -23,6 +24,7 @@ use tokio::time::Duration;
 use tracing::info;
 
 const GAS_BUDGET: u64 = 10000000;
+const NUM_RETRIES: u8 = 10;
 
 pub struct LocalFaucet {
     wallet: WalletContext,
@@ -90,7 +92,9 @@ impl LocalFaucet {
             gas_price,
         );
 
-        Ok(self.execute_txn_with_retries(tx_data, self.coin_id).await)
+        self.execute_txn_with_retries(tx_data, self.coin_id, NUM_RETRIES)
+            .await
+            .map_err(|e| FaucetError::internal(e))
     }
 
     async fn execute_txn(
@@ -130,15 +134,21 @@ impl LocalFaucet {
         &self,
         tx: TransactionData,
         coin_id: ObjectID,
-    ) -> SuiTransactionBlockResponse {
+        num_retries: u8,
+    ) -> Result<SuiTransactionBlockResponse, anyhow::Error> {
         let mut retry_delay = Duration::from_millis(500);
+        let mut i = 0;
 
         loop {
+            if i == num_retries {
+                bail!("Failed to execute transaction after {num_retries} retries",);
+            }
             let res = self.execute_txn(&tx, coin_id).await;
 
-            if let Ok(res) = res {
+            if let Ok(_) = res {
                 return res;
             }
+            i += 1;
             tokio::time::sleep(retry_delay).await;
             retry_delay *= 2;
         }
