@@ -1,4 +1,6 @@
+// Copyright (c) Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
+
 use crate::FaucetError;
 use std::fmt;
 use std::sync::Arc;
