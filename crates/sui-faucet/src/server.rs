@@ -1,6 +1,7 @@
 // Copyright (c) Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
+use crate::types::*;
 use crate::{AppState, FaucetConfig, FaucetError, FaucetRequest};
 use axum::{
     error_handling::HandleErrorLayer,
@@ -10,7 +11,6 @@ use axum::{
     BoxError, Extension, Json, Router,
 };
 use http::Method;
-use serde::{Deserialize, Serialize};
 use std::{
     borrow::Cow,
     net::{IpAddr, SocketAddr},
@@ -19,11 +19,7 @@ use std::{
     time::Duration,
 };
 use sui_config::SUI_CLIENT_CONFIG;
-use sui_sdk::{
-    rpc_types::SuiTransactionBlockEffectsAPI,
-    types::{base_types::ObjectID, digests::TransactionDigest},
-    wallet_context::WalletContext,
-};
+use sui_sdk::{rpc_types::SuiTransactionBlockEffectsAPI, wallet_context::WalletContext};
 use tower::ServiceBuilder;
 use tower_http::cors::{Any, CorsLayer};
 use tracing::info;
@@ -31,44 +27,6 @@ use tracing::info;
 /// basic handler that responds with a static string
 async fn health() -> &'static str {
     "OK"
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub enum RequestStatus {
-    Success,
-    Failure(FaucetError),
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct FaucetResponse {
-    pub status: RequestStatus,
-    pub coin_sent: Option<CoinInfo>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct CoinInfo {
-    pub amount: u64,
-    pub id: ObjectID,
-    pub transfer_tx_digest: TransactionDigest,
-}
-
-impl From<FaucetError> for FaucetResponse {
-    fn from(value: FaucetError) -> Self {
-        FaucetResponse {
-            status: RequestStatus::Failure(value),
-            coin_sent: None,
-        }
-    }
-}
-
-impl From<reqwest::Error> for FaucetResponse {
-    fn from(value: reqwest::Error) -> Self {
-        FaucetResponse {
-            status: RequestStatus::Failure(FaucetError::internal(value)),
-            coin_sent: None,
-        }
-    }
 }
 
 async fn request_local_gas(
@@ -205,4 +163,74 @@ pub async fn start_faucet(app_state: Arc<AppState>) -> Result<(), anyhow::Error>
     .await?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::LocalFaucet;
+    use serde_json::json;
+    use sui_sdk::types::base_types::SuiAddress;
+    use test_cluster::TestClusterBuilder;
+
+    #[tokio::test]
+    async fn test_v2_gas_endpoint() {
+        // Setup test cluster and faucet
+        let cluster = TestClusterBuilder::new().build().await;
+        let port = 9090;
+        let config = FaucetConfig {
+            host_ip: "127.0.0.1".parse().unwrap(),
+            port,
+            ..Default::default()
+        };
+        let local_faucet = LocalFaucet::new(cluster.wallet, config.clone())
+            .await
+            .unwrap();
+
+        let app_state = Arc::new(AppState {
+            faucet: local_faucet,
+            config,
+        });
+
+        // Spawn the faucet in a background task
+        let handle = tokio::spawn(async move {
+            start_faucet(app_state)
+                .await
+                .expect("Failed to start faucet");
+        });
+
+        // Give the server a moment to start
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        let client = reqwest::Client::new();
+
+        // Test successful request
+        let recipient = SuiAddress::random_for_testing_only();
+        let req = FaucetRequest::new_fixed_amount_request(recipient);
+        let response = client
+            .post(format!("http://127.0.0.1:{port}/v2/gas",))
+            .json(&req)
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let faucet_response = response.json::<FaucetResponse>().await.unwrap();
+
+        // Verify the transaction was successful
+        assert!(faucet_response.coin_sent.is_some());
+
+        // Test invalid request
+        let response = client
+            .post(format!("http://127.0.0.1:{port}/v2/gas",))
+            .json(&json!({
+                "recipient": recipient.to_string(),
+            }))
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        handle.abort();
+    }
 }

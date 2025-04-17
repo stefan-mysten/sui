@@ -94,7 +94,7 @@ impl LocalFaucet {
 
         self.execute_txn_with_retries(tx_data, self.coin_id, NUM_RETRIES)
             .await
-            .map_err(|e| FaucetError::internal(e))
+            .map_err(FaucetError::internal)
     }
 
     async fn execute_txn(
@@ -145,7 +145,7 @@ impl LocalFaucet {
             }
             let res = self.execute_txn(&tx, coin_id).await;
 
-            if let Ok(_) = res {
+            if res.is_ok() {
                 return res;
             }
             i += 1;
@@ -193,4 +193,61 @@ async fn find_gas_coins_and_address(
     Err(FaucetError::Wallet(
         "No address found with sufficient coins".to_string(),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+    use test_cluster::TestClusterBuilder;
+
+    #[tokio::test]
+    async fn test_local_faucet_execute_txn() {
+        // Setup test cluster
+        let cluster = TestClusterBuilder::new().build().await;
+        let client = cluster.sui_client().clone();
+
+        let config = FaucetConfig::default();
+        let local_faucet = LocalFaucet::new(cluster.wallet, config).await.unwrap();
+
+        // Test execute_txn
+        let recipient = SuiAddress::random_for_testing_only();
+        let tx = local_faucet.local_request_execute_tx(recipient).await;
+
+        assert!(tx.is_ok());
+
+        let coins = client
+            .coin_read_api()
+            .get_coins(recipient, None, None, None)
+            .await
+            .unwrap();
+
+        assert_eq!(coins.data.len(), 1);
+
+        let tx = local_faucet.local_request_execute_tx(recipient).await;
+        assert!(tx.is_ok());
+        let coins = client
+            .coin_read_api()
+            .get_coins(recipient, None, None, None)
+            .await
+            .unwrap();
+
+        assert_eq!(coins.data.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_find_gas_coins_and_address() {
+        let mut cluster = TestClusterBuilder::new().build().await;
+        let wallet = cluster.wallet_mut();
+        let config = FaucetConfig::default();
+
+        // Test find_gas_coins_and_address
+        let amount = 100000000; // 1 SUI
+        let result = find_gas_coins_and_address(wallet, &config).await;
+        assert!(result.is_ok());
+
+        let (coins, _) = result.unwrap();
+        assert!(!coins.is_empty());
+        assert!(coins.iter().map(|c| c.value()).sum::<u64>() >= amount);
+    }
 }
