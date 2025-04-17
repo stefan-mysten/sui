@@ -24,7 +24,7 @@ use tokio::time::Duration;
 use tracing::info;
 
 const GAS_BUDGET: u64 = 10000000;
-const NUM_RETRIES: u8 = 10;
+const NUM_RETRIES: u8 = 2;
 
 pub struct LocalFaucet {
     wallet: WalletContext,
@@ -116,9 +116,7 @@ impl LocalFaucet {
             .quorum_driver_api()
             .execute_transaction_block(
                 tx.clone(),
-                SuiTransactionBlockResponseOptions::new()
-                    .with_effects()
-                    .with_balance_changes(),
+                SuiTransactionBlockResponseOptions::new().with_effects(),
                 Some(ExecuteTransactionRequestType::WaitForLocalExecution),
             )
             .await
@@ -139,6 +137,7 @@ impl LocalFaucet {
         let mut retry_delay = Duration::from_millis(500);
         let mut i = 0;
 
+        println!("Trying faucet");
         loop {
             if i == num_retries {
                 bail!("Failed to execute transaction after {num_retries} retries",);
