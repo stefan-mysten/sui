@@ -42,6 +42,9 @@ pub enum PackageError {
     Io(#[from] std::io::Error),
 
     #[error(transparent)]
+    FromUTF8(#[from] std::string::FromUtf8Error),
+
+    #[error(transparent)]
     Manifest(#[from] ManifestError),
 
     #[error(transparent)]
