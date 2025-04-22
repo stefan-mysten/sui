@@ -42,6 +42,14 @@ impl<T> Located<T> {
         }
     }
 
+    /// Use when needing to construct a Located<T> without a file or span
+    pub fn new_for_testing(value: T) -> Self {
+        Self {
+            file: FileHandle::new_for_testing(0),
+            value: Spanned::new(0..0, value),
+        }
+    }
+
     pub fn span(&self) -> Range<usize> {
         self.value.span()
     }

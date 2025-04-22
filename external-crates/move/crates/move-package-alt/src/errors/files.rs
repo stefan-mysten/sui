@@ -40,6 +40,10 @@ impl FileHandle {
     pub fn source(&self) -> &'static String {
         &FILES[self.id].1
     }
+
+    pub fn new_for_testing(id: usize) -> Self {
+        Self { id }
+    }
 }
 
 impl Debug for FileHandle {

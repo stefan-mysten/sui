@@ -25,8 +25,9 @@ use std::{
 
 use derive_where::derive_where;
 use serde::{Deserialize, Serialize};
+use tracing::debug;
 
-use crate::errors::{PackageError, PackageResult};
+use crate::errors::{GitError, GitErrorKind, Located, PackageError, PackageResult};
 
 use super::{DependencySet, Pinned, Unpinned};
 
@@ -38,15 +39,15 @@ type Sha = String;
 pub struct GitDependency<P = Unpinned> {
     /// The repository containing the dependency
     #[serde(rename = "git")]
-    repo: String,
+    repo: Located<String>,
 
     /// The git commit-ish for the dep; guaranteed to be a commit if [P] is [Pinned].
     #[serde(default)]
-    rev: Option<String>,
+    rev: Option<Located<String>>,
 
     /// The path within the repository
     #[serde(default)]
-    path: Option<PathBuf>,
+    path: Option<Located<PathBuf>>,
 
     #[serde(skip)]
     phantom: PhantomData<P>,
@@ -74,7 +75,7 @@ impl GitDependency<Unpinned> {
 
         let (sha, git_dep_path) = git_dep.fetch()?;
 
-        git_dep.rev = Some(sha);
+        git_dep.rev = Some(Located::new_for_testing(sha));
 
         Ok(git_dep)
     }
@@ -95,7 +96,8 @@ impl GitDependency<Pinned> {
         // Get the SHA
         let sha = self.fetch_sha_git_ls_remote()?;
 
-        let repo_fs_path = format_repo_to_fs_path(&self.repo, &sha);
+        let repo_fs_path = format_repo_to_fs_path(self.repo.get_ref(), &sha);
+        debug!("Repo path on disk: {:?}", repo_fs_path.display());
 
         // Checkout repo if it does not exist already
         if !repo_fs_path.exists() {
@@ -105,61 +107,93 @@ impl GitDependency<Pinned> {
             self.try_sparse_checkout_init(&repo_fs_path)?;
 
             // if there's a given path, then set it for the sparse checkout
-            if let Some(path) = self.path.as_ref() {
-                // check the path exists
-                self.check_path_exists(&repo_fs_path, path)?;
-                // init the sparse checkout
-                self.try_set_sparse_dir(&repo_fs_path, path)?;
-            } else if self.repo.contains("MystenLabs/sui") || self.repo.contains("mystenlabs/sui") {
-                // if no path is set, then what do we need to checkout
-                // we need to checkout the whole repo
-                // if it's Sui, we need to sparse checkout the /crates/sui-framework folder
-                self.try_set_sparse_dir(&repo_fs_path, &PathBuf::from("crates/sui-framework"))?;
+            let path = if let Some(path) = self.path.as_ref() {
+                path.get_ref()
             } else {
-                // if no path is set, then what do we need to checkout
                 // we need to checkout the whole repo
-                // if it's Sui, we need to sparse checkout the /crates/sui-framework folder
-                self.try_set_sparse_dir(&repo_fs_path, &repo_fs_path)?;
-            }
+                &repo_fs_path
+            };
 
-            self.try_checkout(&repo_fs_path)?;
+            debug!("Path to checkout: {:?}", path);
+
+            self.try_set_sparse_dir(&repo_fs_path, &path)?;
+
+            self.try_checkout_at_sha(&repo_fs_path, &sha)?;
+
+            // check it is a Move project.
+            self.check_is_move_project(&repo_fs_path, path)?;
+        } else {
+            // check if the repo is dirty and fail if it is
+            let cmd = Command::new("git")
+                .arg("status")
+                .arg("--porcelain")
+                .current_dir(&repo_fs_path)
+                .stdin(Stdio::null())
+                .output()
+                .map_err(|e| {
+                    PackageError::Generic(format!("Could not execute git status command, {e}",))
+                })?;
+
+            if !cmd.stdout.is_empty() {
+                return Err(PackageError::Git(GitError {
+                    kind: GitErrorKind::Dirty(repo_fs_path.display().to_string()),
+                    span: Some(self.repo.span()),
+                    handle: self.repo.file(),
+                }));
+            }
         }
 
         Ok((sha, repo_fs_path))
     }
 
-    fn check_path_exists(&self, repo_fs_path: &PathBuf, path: &PathBuf) -> PackageResult<()> {
+    /// This function checks if the given path in this GitDependency has a Move.toml file.
+    /// It needs to be called after the checkout, as otherwise it will not be able to find the
+    /// file.
+    fn check_is_move_project(&self, repo_fs_path: &PathBuf, path: &PathBuf) -> PackageResult<()> {
+        let move_toml_path = repo_fs_path.join(path).join("Move.toml");
+        debug!("Move toml path: {:?}", move_toml_path.display());
         let cmd = Command::new("git")
             .current_dir(&repo_fs_path)
             .arg("ls-tree")
-            .arg("-d")
             .arg("HEAD")
-            .arg(&path)
+            .arg(&move_toml_path)
             .stdin(Stdio::null())
             .output()
             .map_err(|e| {
-                PackageError::Generic(format!(
-                    "Could not find the specified directory {}, error: {}",
-                    path.display(),
-                    e
-                ))
+                PackageError::Generic(format!("Could not execute git ls-tree command",))
             })?;
 
         if cmd.stdout.is_empty() {
-            return Err(PackageError::Generic(format!(
-                "The specified directory {} does not exist in the repository {}",
-                path.display(),
-                self.repo
-            )));
+            if let Some(path) = self.path.as_ref() {
+                return Err(PackageError::Git(GitError {
+                    kind: GitErrorKind::NotMoveProject(
+                        "path".to_string(),
+                        path.get_ref().display().to_string(),
+                    ),
+                    span: Some(path.span()),
+                    handle: path.file(),
+                }));
+            } else {
+                return Err(PackageError::Git(GitError {
+                    kind: GitErrorKind::NotMoveProject(
+                        "repo".to_string(),
+                        self.repo.get_ref().to_string(),
+                    ),
+                    span: Some(self.repo.span()),
+                    handle: self.repo.file(),
+                }));
+            };
         }
 
         Ok(())
     }
 
-    fn try_checkout(&self, repo_fs_path: &PathBuf) -> PackageResult<()> {
+    /// Check out the given SHA in the given repo
+    fn try_checkout_at_sha(&self, repo_fs_path: &PathBuf, sha: &str) -> PackageResult<()> {
+        debug!("Checking out with SHA: {sha}");
         let cmd = Command::new("git")
             .arg("checkout")
-            .arg("@")
+            .arg(sha)
             .current_dir(&repo_fs_path)
             .stdin(Stdio::null())
             .output()
@@ -228,7 +262,7 @@ impl GitDependency<Pinned> {
             .arg("--sparse")
             .arg("--filter=blob:none")
             .arg("--no-checkout")
-            .arg(&self.repo)
+            .arg(&self.repo.get_ref())
             .arg(&repo_fs_path)
             .stdin(Stdio::null())
             .output();
@@ -236,7 +270,7 @@ impl GitDependency<Pinned> {
         if cmd.is_err() {
             return Err(PackageError::Generic(format!(
                 "git clone failed for {}, with error: {}",
-                self.repo,
+                self.repo.get_ref(),
                 cmd.unwrap_err()
             )));
         }
@@ -246,11 +280,17 @@ impl GitDependency<Pinned> {
 
     /// Find the SHA of the given commit/branch in the given repo
     fn fetch_sha_git_ls_remote(&self) -> PackageResult<String> {
+        let rev = match self.rev.as_ref() {
+            Some(r) if check_is_commit_sha(&r.get_ref()) => return Ok(r.get_ref().to_string()),
+            Some(r) => r.get_ref(),
+            None => &"main".to_string(),
+        };
+
         // git ls-remote https://github.com/user/repo.git refs/heads/main
         let cmd = Command::new("git")
             .arg("ls-remote")
-            .arg(&self.repo)
-            .arg(&self.rev.as_ref().unwrap_or(&"main".to_string()))
+            .arg(&self.repo.get_ref())
+            .arg(rev)
             .stdin(Stdio::null())
             .output();
 
@@ -267,13 +307,23 @@ impl GitDependency<Pinned> {
     }
 }
 
-/// Format the repository URL to a filesystem path
+/// Format the repository URL to a filesystem path based on the SHA
 pub fn format_repo_to_fs_path(repo: &str, sha: &str) -> PathBuf {
     PathBuf::from(format!(
         "{}/{}_{sha}",
         *move_command_line_common::env::MOVE_HOME,
         url_to_file_name(repo)
     ))
+}
+
+fn check_is_commit_sha(input: &str) -> bool {
+    let len = input.len();
+    // Must be all lowercase hex and 5 to 40 characters
+    len >= 5
+        && len <= 40
+        && input
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
 }
 
 /// Transform a repository URL into a directory name
@@ -289,86 +339,275 @@ fn url_to_file_name(url: &str) -> String {
 mod tests {
     use super::*;
     use std::env;
-    use tempfile::tempdir;
+    use std::fs;
+    use std::path::Path;
+    use tempfile::{tempdir, TempDir};
 
-    fn setup_temp_dir() -> tempfile::TempDir {
+    fn setup_temp_dir() -> TempDir {
         let temp_dir = tempdir().unwrap();
         // Set MOVE_HOME to the temp directory
         env::set_var("MOVE_HOME", temp_dir.path());
         temp_dir
     }
 
-    #[test]
-    fn test_sparse_checkout_specific_folder() {
-        let _temp_dir = setup_temp_dir();
+    /// Sets up a test Move project with git repository
+    /// It returns the temporary directory, the root path of the project, the first commit sha, and
+    /// and the second commit sha.
+    pub fn setup_test_move_project() -> (TempDir, PathBuf, String, String) {
+        // Create a temporary directory
+        let temp_dir = tempdir().unwrap();
+        let mut root_path = temp_dir.path().to_path_buf();
+        root_path.push("test_move_project");
 
-        // Create a git dependency with specific path
+        // Create the root directory for the Move project
+        fs::create_dir_all(&root_path).unwrap();
+
+        // Initialize git repository
+        Command::new("git")
+            .args(["init"])
+            .current_dir(&root_path)
+            .output()
+            .unwrap();
+
+        // Configure git user for commits
+        Command::new("git")
+            .args(["config", "user.name", "Test User"])
+            .current_dir(&root_path)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["config", "user.email", "test@example.com"])
+            .current_dir(&root_path)
+            .output()
+            .unwrap();
+
+        // Create directory structure
+        let packages_path = root_path.join("packages");
+        let sui_path = packages_path.join("sui");
+        let mvr_path = packages_path.join("mvr");
+        fs::create_dir_all(&sui_path).unwrap();
+        fs::create_dir_all(&mvr_path).unwrap();
+
+        // Create initial Move.toml files
+        let sui_toml = create_initial_move_toml("sui");
+        let mvr_toml = create_initial_move_toml("mvr");
+        fs::write(sui_path.join("Move.toml"), &sui_toml).unwrap();
+        fs::write(mvr_path.join("Move.toml"), &mvr_toml).unwrap();
+
+        // Initial commit
+        Command::new("git")
+            .args(["add", "."])
+            .current_dir(&root_path)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "-m", "Initial commit"])
+            .current_dir(&root_path)
+            .output()
+            .unwrap();
+
+        // Update Move.toml with dependencies
+        let mvr_toml = create_updated_move_toml("mvr");
+        fs::write(mvr_path.join("Move.toml"), &mvr_toml).unwrap();
+
+        // Commit updates
+        Command::new("git")
+            .args(["add", "."])
+            .current_dir(&root_path)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "-m", "Add dependencies"])
+            .current_dir(&root_path)
+            .output()
+            .unwrap();
+
+        // Get commits SHA
+        let commits = Command::new("git")
+            .args(["log", "--pretty=format:%H"])
+            .current_dir(&root_path)
+            .output()
+            .unwrap();
+        let commits = String::from_utf8_lossy(&commits.stdout);
+        let commits: Vec<_> = commits.lines().collect();
+
+        (
+            temp_dir,
+            root_path,
+            commits[1].to_string(),
+            commits[0].to_string(),
+        )
+    }
+
+    fn create_initial_move_toml(name: &str) -> String {
+        format!(
+            r#"[package]
+name = "{}"
+edition = "2024.beta"
+license = "Apache-2.0"
+authors = ["Move Team"]
+flavor = "vanilla"
+
+[environments]
+mainnet = "35834a8a"
+testnet = "4c78adac"
+"#,
+            name
+        )
+    }
+
+    fn create_updated_move_toml(name: &str) -> String {
+        format!(
+            r#"[package]
+name = "{}"
+edition = "2024.beta"
+license = "Apache-2.0"
+authors = ["Move Team"]
+flavor = "vanilla"
+
+[environments]
+mainnet = "35834a8a"
+testnet = "4c78adac"
+
+[dependencies]
+foo = {{ git = "https://example.com/foo.git", rev = "releases/v1", rename-from = "Foo", override = true}}
+qwer = {{ r.mvr = "@pkg/qwer" }}
+
+[dep-overrides]
+# used to override dependencies for specific environments
+mainnet.foo = {{ 
+    git = "https://example.com/foo.git", 
+    original-id = "0x6ba0cc1a418ff3bebce0ff9ec3961e6cc794af9bc3a4114fb138d00a4c9274bb", 
+    published-at = "0x6ba0cc1a418ff3bebce0ff9ec3961e6cc794af9bc3a4114fb138d00a4c9274bb", 
+    use-environment = "mainnet_alpha" 
+}}
+
+[dep-overrides.mainnet.bar]
+git = "https://example.com/bar.git"
+original-id = "0x12g0cc1a418ff3bebce0ff9ec3961e6cc794af9bc3a4114fb138d00a4c9274bb"
+published-at = "0x12ga0cc1a418ff3bebce0ff9ec3961e6cc794af9bc3a4114fb138d00a4c9274bb"
+use-environment = "mainnet_beta"
+"#,
+            name
+        )
+    }
+
+    #[test]
+    fn test_sparse_checkout_folder() {
+        let (_temp_folder, fs_repo, first_sha, second_sha) = setup_test_move_project();
+        let temp_dir = setup_temp_dir();
+        let fs_repo = fs_repo.to_str().unwrap();
+
+        // Pass in a branch name
         let git_dep = GitDependency::<Pinned> {
-            repo: "https://github.com/MystenLabs/sui.git".to_string(),
-            rev: Some("main".to_string()),
-            path: Some(PathBuf::from("crates/sui-framework")),
+            repo: Located::new_for_testing(fs_repo.to_string()),
+            rev: Some(Located::new_for_testing("main".to_string())),
+            path: Some(Located::new_for_testing(PathBuf::from("packages/sui"))),
             phantom: std::marker::PhantomData,
         };
 
         // Fetch the dependency
-        let (_, checkout_path) = git_dep.fetch().unwrap();
+        let (sha, checkout_path) = git_dep.fetch().unwrap();
 
-        // Verify only sui-framework was checked out
-        assert!(checkout_path.join("crates/sui-framework").exists());
-        assert!(!checkout_path.join("crates/sui-core").exists());
+        // Verify the SHA is correct
+        assert_eq!(sha, second_sha);
+
+        // Verify only packages/sui was checked out
+        assert!(checkout_path.join("packages/sui").exists());
+        assert!(!checkout_path.join("packages/mvr").exists());
+
+        let (_temp_folder, fs_repo, first_sha, second_sha) = setup_test_move_project();
+        let fs_repo = fs_repo.to_str().unwrap();
+        // Pass in a commit SHA
+        let git_dep = GitDependency::<Pinned> {
+            repo: Located::new_for_testing(fs_repo.to_string()),
+            rev: Some(Located::new_for_testing(first_sha.to_string())),
+            path: Some(Located::new_for_testing(PathBuf::from("packages/mvr"))),
+            phantom: std::marker::PhantomData,
+        };
+
+        // Fetch the dependency
+        let (sha, checkout_path) = git_dep.fetch().unwrap();
+
+        // Verify the SHA is correct
+        assert_eq!(sha, first_sha);
+
+        // Verify only packages/mvr was checked out
+        assert!(checkout_path.join("packages/mvr").exists());
+        assert!(!checkout_path.join("packages/sui").exists());
     }
 
     #[test]
-    fn test_full_repository_checkout() {
-        let _temp_dir = setup_temp_dir();
+    fn test_wrong_sha() {
+        let (_temp_folder, fs_repo, first_sha, second_sha) = setup_test_move_project();
+        let temp_dir = setup_temp_dir();
+        let fs_repo = fs_repo.to_str().unwrap();
 
-        // Create a git dependency without specific path
         let git_dep = GitDependency::<Pinned> {
-            repo: "https://github.com/MystenLabs/sui.git".to_string(),
-            rev: Some("main".to_string()),
+            repo: Located::new_for_testing(fs_repo.to_string()),
+            rev: Some(Located::new_for_testing("912saTsvc".to_string())),
+            path: Some(Located::new_for_testing(PathBuf::from("packages/sui"))),
+            phantom: std::marker::PhantomData,
+        };
+
+        // Fetch the dependency
+        let result = git_dep.fetch();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_wrong_branch_name() {
+        let (_temp_folder, fs_repo, first_sha, second_sha) = setup_test_move_project();
+        let temp_dir = setup_temp_dir();
+        let fs_repo = fs_repo.to_str().unwrap();
+
+        let git_dep = GitDependency::<Pinned> {
+            repo: Located::new_for_testing(fs_repo.to_string()),
+            rev: Some(Located::new_for_testing("test".to_string())),
+            path: Some(Located::new_for_testing(PathBuf::from("packages/sui"))),
+            phantom: std::marker::PhantomData,
+        };
+
+        // Fetch the dependency
+        let result = git_dep.fetch();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_full_repository_checkout_no_move_toml_in_root() {
+        let (_temp_folder, fs_repo, first_sha, second_sha) = setup_test_move_project();
+        let temp_dir = setup_temp_dir();
+        let fs_repo = fs_repo.to_str().unwrap();
+
+        let git_dep = GitDependency::<Pinned> {
+            repo: Located::new_for_testing(fs_repo.to_string()),
+            rev: Some(Located::new_for_testing("main".to_string())),
             path: None,
             phantom: std::marker::PhantomData,
         };
 
-        // Fetch the dependency
-        let (_, checkout_path) = git_dep.fetch().unwrap();
-
-        // Verify sui-framework was checked out
-        assert!(checkout_path.join("crates/sui-framework").exists());
+        // The move project from setup has no root Move.toml file, so this should fail
+        let result = git_dep.fetch();
+        assert!(result.is_err());
     }
 
     #[test]
     fn test_non_existent_path_error() {
-        let _temp_dir = setup_temp_dir();
+        let (_temp_folder, fs_repo, first_sha, second_sha) = setup_test_move_project();
+        let temp_dir = setup_temp_dir();
+        let fs_repo = fs_repo.to_str().unwrap();
 
-        // Create a git dependency with non-existent path
         let git_dep = GitDependency::<Pinned> {
-            repo: "https://github.com/MystenLabs/sui.git".to_string(),
-            rev: Some("main".to_string()),
-            path: Some(PathBuf::from("non_existent_folder")),
+            repo: Located::new_for_testing(fs_repo.to_string()),
+            rev: Some(Located::new_for_testing("main".to_string())),
+            path: Some(Located::new_for_testing(PathBuf::from(
+                "non_existent_folder",
+            ))),
             phantom: std::marker::PhantomData,
         };
 
         // Fetch should fail
         let result = git_dep.fetch();
         assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_non_sui_repository_full_checkout() {
-        let _temp_dir = setup_temp_dir();
-
-        // Create a git dependency for a non-Sui repository
-        let git_dep = GitDependency::<Pinned> {
-            repo: "https://github.com/MystenLabs/mvr".to_string(),
-            rev: Some("9114043".to_string()),
-            path: Some(PathBuf::from("packages/mvr")),
-            phantom: std::marker::PhantomData,
-        };
-
-        // Fetch the dependency
-        let (_, checkout_path) = git_dep.fetch().unwrap();
-
-        assert!(checkout_path.join("packages/mvr").exists());
     }
 }
