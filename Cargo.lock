@@ -8021,6 +8021,8 @@ dependencies = [
  "derive-where",
  "external-resolver",
  "futures",
+ "move-command-line-common",
+ "regex",
  "serde",
  "serde_spanned",
  "thiserror 1.0.69",
