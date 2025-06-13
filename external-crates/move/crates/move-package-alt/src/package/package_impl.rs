@@ -17,7 +17,7 @@ use crate::{
     package::lockfile::Lockfiles,
     schema::{LocalDepInfo, LockfileDependencyInfo, OriginalID, Publication, PublishedID},
 };
-use move_core_types::identifier::Identifier;
+use move_core_types::{account_address::AccountAddress, identifier::Identifier};
 
 pub type EnvironmentName = String;
 pub type EnvironmentID = String;

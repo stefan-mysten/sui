@@ -17,6 +17,7 @@ use tracing::debug;
 
 #[cfg(test)]
 use crate::dependency::PinnedDependencyInfo;
+use move_compiler::shared::NumericalAddress;
 
 /// A package that is defined as the root of a Move project.
 ///
@@ -26,6 +27,7 @@ use crate::dependency::PinnedDependencyInfo;
 pub struct RootPackage<F: MoveFlavor + fmt::Debug> {
     /// The root package itself as a Package
     root: Package<F>,
+    // direct_dependencies: BTreeMap<EnvironmentName, PackageGraph<F>>,
     /// A map from an environment in the manifest to its dependency graph.
     dependencies: BTreeMap<EnvironmentName, PackageGraph<F>>,
 }
@@ -111,6 +113,10 @@ impl<F: MoveFlavor + fmt::Debug> RootPackage<F> {
         self.root.manifest()
     }
 
+    pub fn edition(&self) -> &str {
+        self.manifest().edition()
+    }
+
     /// The package's defined environments
     pub fn environments(&self) -> BTreeMap<EnvironmentName, EnvironmentID> {
         self.manifest().environments()
@@ -119,6 +125,10 @@ impl<F: MoveFlavor + fmt::Debug> RootPackage<F> {
     /// Return the defined package name in the manifest
     pub fn package_name(&self) -> &PackageName {
         self.manifest().package_name()
+    }
+
+    pub fn root_pkg(&self) -> &Package<F> {
+        &self.root
     }
 
     // *** DEPENDENCIES RELATED FUNCTIONS ***
@@ -185,6 +195,29 @@ impl<F: MoveFlavor + fmt::Debug> RootPackage<F> {
     /// Return the package path wrapper
     pub fn package_path(&self) -> &PackagePath {
         self.root.path()
+    }
+
+    // TODO: is this correct?
+    pub fn extract_named_address_mapping(
+        &self,
+        env: &EnvironmentName,
+    ) -> PackageResult<impl Iterator<Item = (String, NumericalAddress)>> {
+        let deps = self.dependencies.get(env).ok_or_else(
+            (|| PackageError::Generic("Cannot find env in root package".to_string())),
+        )?;
+        let mut named_address: Vec<(String, NumericalAddress)> = vec![];
+
+        for d in deps.nodes() {
+            let addr = &d.published_at(env)?;
+            let addr = NumericalAddress::new(
+                addr.0.into_bytes(),
+                move_compiler::shared::NumberFormat::Hex,
+            );
+            // TODO: What is the correct name here?
+            named_address.push((d.name().to_string(), addr));
+        }
+
+        Ok(named_address.into_iter())
     }
 }
 

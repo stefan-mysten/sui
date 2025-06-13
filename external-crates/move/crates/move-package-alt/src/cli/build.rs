@@ -4,7 +4,12 @@
 
 use std::path::PathBuf;
 
-use crate::{errors::PackageResult, flavor::Vanilla, package::Package};
+use crate::{
+    // compilation::{build_config::BuildConfig, compiled_package::compile},
+    errors::PackageResult,
+    flavor::Vanilla,
+    package::RootPackage,
+};
 use clap::Parser;
 
 /// Build the package
@@ -13,15 +18,26 @@ pub struct Build {
     /// Path to the project
     #[arg(name = "path", short = 'p', long = "path", default_value = ".")]
     path: Option<PathBuf>,
+
+    #[arg(
+        name = "env",
+        short = 'e',
+        long = "environment",
+        default_value = "testnet"
+    )]
+    env: String,
+    // #[command(flatten)]
+    // build_config: BuildConfig,
 }
 
 impl Build {
     pub async fn execute(&self) -> PackageResult<()> {
         let path = self.path.clone().unwrap_or_else(|| PathBuf::from("."));
 
-        let package = Package::<Vanilla>::load_root(path).await?;
-
-        // TODO: Implement the actual build logic here.
+        let root_pkg = RootPackage::<Vanilla>::load(path, None).await?;
+        // compile::<Vanilla>(&root_pkg, &self.build_config, &self.env)
+        //     .await
+        //     .unwrap();
 
         Ok(())
     }
