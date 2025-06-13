@@ -10,5 +10,9 @@ edition = "2021"
 workspace = true
 
 [dependencies]
+clap.workspace = true
 move-package-alt.workspace = true
 serde.workspace = true
+sui-config.workspace = true
+sui-sdk.workspace = true
+tokio.workspace = true

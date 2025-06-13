@@ -199,6 +199,10 @@ impl ManifestError {
                 .with_notes(vec![self.to_string()]),
         }
     }
+
+    pub fn edition(&self) -> &str {
+        &self.package.edition.get_ref()
+    }
 }
 
 impl<F: MoveFlavor> std::fmt::Debug for Manifest<F> {
