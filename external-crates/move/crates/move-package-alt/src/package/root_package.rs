@@ -18,6 +18,7 @@ use crate::{
     package::EnvironmentName,
     schema::ParsedLockfile,
 };
+use move_compiler::shared::NumericalAddress;
 
 /// A package that is defined as the root of a Move project.
 ///
@@ -186,9 +187,25 @@ impl<F: MoveFlavor + fmt::Debug> RootPackage<F> {
         &self.graph
     }
 
-    pub fn lockfile_for_testing(&self) -> &ParsedLockfile<F> {
+    pub fn lockfile(&self) -> &ParsedLockfile<F> {
         &self.lockfile
     }
+
+    /// Return the publication information for this environment.
+    pub fn publication(&self, env: EnvironmentName) -> PackageResult<Publication<F>> {
+        self.lockfile
+            .published
+            .get(&env)
+            .ok_or_else(|| {
+                PackageError::Generic(format!(
+                    "Could not find publication info for {} environment in package {}",
+                    env,
+                    self.name()
+                ))
+            })
+            .cloned()
+    }
+
     // *** PATHS RELATED FUNCTIONS ***
 
     /// Return the package path wrapper
@@ -204,6 +221,33 @@ impl<F: MoveFlavor + fmt::Debug> RootPackage<F> {
     /// Return the list of this root package's dependencies
     pub fn dependencies(&self) -> Vec<Arc<Package<F>>> {
         self.package_graph().dependencies()
+    }
+
+    // TODO: is this correct?
+    pub fn extract_named_address_mapping(
+        &self,
+        env: &EnvironmentName,
+    ) -> PackageResult<impl Iterator<Item = (String, NumericalAddress)>> {
+        let deps = self.dependencies();
+        let mut named_address: Vec<(String, NumericalAddress)> = vec![];
+
+        for d in deps {
+            let addr = &d.published_at().ok_or_else(|| {
+                PackageError::Generic(format!(
+                    "No published at information for package {} at {:?}",
+                    d.name(),
+                    d.path(),
+                ))
+            })?;
+            let addr = NumericalAddress::new(
+                addr.0.into_bytes(),
+                move_compiler::shared::NumberFormat::Hex,
+            );
+            // TODO: What is the correct name here?
+            named_address.push((d.name().to_string(), addr));
+        }
+
+        Ok(named_address.into_iter())
     }
 }
 
@@ -320,7 +364,7 @@ pkg_b = { local = "../pkg_b" }"#,
 
         let mut root = RootPackage::<Vanilla>::load(&pkg_path, env).await.unwrap();
 
-        let new_lockfile = root.lockfile_for_testing().clone();
+        let new_lockfile = root.lockfile().clone();
 
         // TODO: put this snapshot in a more sensible place
         assert_snapshot!("test_lockfile_deps", new_lockfile.render_as_toml());

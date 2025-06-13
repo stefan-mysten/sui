@@ -26,7 +26,6 @@ use move_package_alt::{
 #[derive(Debug)]
 pub struct BuildPlan<F: MoveFlavor> {
     root_pkg: RootPackage<F>,
-    _env: Environment,
     _sorted_deps: Vec<PackageName>,
     _package_graph: PackageGraph<F>,
     compiler_vfs_root: Option<VfsPath>,
@@ -34,17 +33,12 @@ pub struct BuildPlan<F: MoveFlavor> {
 }
 
 impl<F: MoveFlavor> BuildPlan<F> {
-    pub fn create(
-        root_pkg: RootPackage<F>,
-        build_config: &BuildConfig,
-        env: &Environment,
-    ) -> PackageResult<Self> {
+    pub fn create(root_pkg: RootPackage<F>, build_config: &BuildConfig) -> PackageResult<Self> {
         let _package_graph = root_pkg.package_graph().clone();
         let _sorted_deps = root_pkg.package_graph().sorted_deps();
 
         Ok(Self {
             root_pkg,
-            _env: env.clone(),
             _sorted_deps,
             _package_graph,
             build_config: build_config.clone(),

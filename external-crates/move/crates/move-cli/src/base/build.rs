@@ -1,10 +1,18 @@
 // Copyright (c) The Move Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use super::reroot_path;
 use clap::*;
-use move_package::BuildConfig;
-use std::path::Path;
+use move_package_alt::{
+    flavor::{MoveFlavor, Vanilla},
+    package::RootPackage,
+    schema::Environment,
+};
+use move_package_alt_compilation::build_config::BuildConfig;
+use move_package_alt_compilation::compile_package;
+use std::{
+    io::Stdout,
+    path::{Path, PathBuf},
+};
 
 /// Build the package at `path`. If no path is provided defaults to current directory.
 #[derive(Parser)]
@@ -12,22 +20,32 @@ use std::path::Path;
 pub struct Build;
 
 impl Build {
-    pub fn execute(self, path: Option<&Path>, config: BuildConfig) -> anyhow::Result<()> {
-        let rerooted_path = reroot_path(path)?;
-        if config.fetch_deps_only {
-            let mut config = config;
-            if config.test_mode {
-                config.dev_mode = true;
-            }
-            config.download_deps_for_package(&rerooted_path, &mut std::io::stdout())?;
-            return Ok(());
-        }
+    pub async fn execute<F: MoveFlavor>(
+        self,
+        path: Option<&Path>,
+        config: BuildConfig,
+    ) -> anyhow::Result<()> {
+        let p = PathBuf::from(".");
+        let path = path.clone().unwrap_or_else(|| &p);
 
-        config.clone().cli_compile_package(
-            &rerooted_path,
-            &mut std::io::stdout(),
-            &mut std::io::stdin().lock(),
-        )?;
+        let envs = RootPackage::<Vanilla>::environments(path)?;
+
+        let env = if let Some(ref e) = config.environment {
+            if let Some(env) = envs.get(e) {
+                Environment::new(e.to_string(), env.to_string())
+            } else {
+                let (name, id) = envs.first_key_value().expect("At least one default env");
+                Environment::new(name.to_string(), id.to_string())
+            }
+        } else {
+            let (name, id) = envs.first_key_value().expect("At least one default env");
+            Environment::new(name.to_string(), id.to_string())
+        };
+
+        let compiled_package =
+            compile_package::<Stdout, Vanilla>(path, &config, &env, &mut std::io::stdout()).await?;
+
+        println!("Build completed");
         Ok(())
     }
 }

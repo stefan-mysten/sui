@@ -16,7 +16,7 @@ use crate::{
     dependency::PinnedDependencyInfo,
     errors::PackageResult,
     flavor::MoveFlavor,
-    package::{EnvironmentName, Package, paths::PackagePath},
+    package::{paths::PackagePath, EnvironmentName, Package},
     schema::{Environment, PackageName},
 };
 use builder::PackageGraphBuilder;
