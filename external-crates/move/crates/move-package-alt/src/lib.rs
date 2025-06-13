@@ -8,6 +8,7 @@
 
 #![allow(unused)]
 pub mod cli;
+pub mod compilation;
 pub mod dependency;
 pub mod errors;
 pub mod flavor;

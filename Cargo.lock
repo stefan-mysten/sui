@@ -8198,11 +8198,20 @@ dependencies = [
  "clap",
  "codespan-reporting",
  "derive-where",
+ "dunce",
  "futures",
  "itertools 0.10.5",
+ "move-binary-format",
+ "move-bytecode-source-map",
+ "move-bytecode-utils",
  "move-command-line-common",
+ "move-compiler",
  "move-core-types",
+ "move-disassembler",
+ "move-docgen",
+ "move-model-2",
  "move-package",
+ "move-symbol-pool",
  "once_cell",
  "path-clean",
  "petgraph 0.8.1",
@@ -8210,6 +8219,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_spanned",
+ "serde_yaml 0.8.26",
  "sha2 0.9.9",
  "thiserror 1.0.69",
  "tokio",
@@ -15405,8 +15415,12 @@ dependencies = [
 name = "sui-package-alt"
 version = "1.51.0"
 dependencies = [
+ "clap",
  "move-package-alt",
  "serde",
+ "sui-config",
+ "sui-sdk",
+ "tokio",
 ]
 
 [[package]]

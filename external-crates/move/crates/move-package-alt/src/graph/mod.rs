@@ -37,7 +37,7 @@ pub struct PackageGraph<F: MoveFlavor> {
 /// A node in the package graph, containing a [Package] and its pinned dependency info.
 #[derive(Debug)]
 pub struct PackageNode<F: MoveFlavor> {
-    package: Package<F>,
+    pub package: Package<F>,
     pinned_dep: PinnedDependencyInfo,
 }
 
@@ -190,6 +190,24 @@ impl<F: MoveFlavor> PackageGraph<F> {
         new_pinned_deps.insert(env.clone(), DependencyInfo { data });
 
         Ok(new_pinned_deps)
+    }
+
+    pub fn nodes(&self) -> Vec<&Arc<PackageNode<F>>> {
+        self.inner.node_weights().collect()
+    }
+
+    // Find the direct dependency of a package
+    pub fn direct_deps(&self, package: &PackageName) -> Option<Vec<NodeIndex>> {
+        let node = self
+            .inner
+            .node_indices()
+            .find(|i| &self.inner[*i].name() == &package);
+
+        node.map(|node| {
+            self.inner
+                .neighbors_directed(node, petgraph::Direction::Outgoing)
+                .collect::<Vec<_>>()
+        })
     }
 }
 

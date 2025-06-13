@@ -33,6 +33,7 @@ use tracing::{debug, info};
 pub struct RootPackage<F: MoveFlavor + fmt::Debug> {
     /// The root package itself as a Package
     root: Package<F>,
+    // direct_dependencies: BTreeMap<EnvironmentName, PackageGraph<F>>,
     /// A map from an environment in the manifest to its dependency graph.
     dependencies: BTreeMap<EnvironmentName, PackageGraph<F>>,
 }
@@ -106,6 +107,10 @@ impl<F: MoveFlavor + fmt::Debug> RootPackage<F> {
         self.root.manifest()
     }
 
+    pub fn edition(&self) -> &str {
+        self.manifest().edition()
+    }
+
     /// The package's defined environments
     pub fn environments(&self) -> &BTreeMap<EnvironmentName, F::EnvironmentID> {
         self.manifest().environments()
@@ -120,6 +125,19 @@ impl<F: MoveFlavor + fmt::Debug> RootPackage<F> {
 
     pub fn dependencies(&self) -> &BTreeMap<EnvironmentName, PackageGraph<F>> {
         &self.dependencies
+    }
+
+    pub fn direct_dependencies_by_env(
+        &self,
+        env: &EnvironmentName,
+    ) -> PackageResult<BTreeMap<PackageName, PinnedDependencyInfo>> {
+        let deps = self.dependencies.get(env);
+
+        if let Some(deps) = deps {
+            deps.direct_deps(self.package_name());
+        }
+
+        Ok(BTreeMap::new())
     }
 
     /// Create a [`Lockfile`] with the current package's dependencies. The lockfile will have no
