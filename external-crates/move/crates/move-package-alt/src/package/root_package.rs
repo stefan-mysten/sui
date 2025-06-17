@@ -106,6 +106,10 @@ impl<F: MoveFlavor + fmt::Debug> RootPackage<F> {
         self.root.manifest()
     }
 
+    pub fn edition(&self) -> &str {
+        self.manifest().edition()
+    }
+
     /// The package's defined environments
     pub fn environments(&self) -> &BTreeMap<EnvironmentName, F::EnvironmentID> {
         self.manifest().environments()

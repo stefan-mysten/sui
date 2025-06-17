@@ -37,7 +37,7 @@ pub struct PackageGraph<F: MoveFlavor> {
 /// A node in the package graph, containing a [Package] and its pinned dependency info.
 #[derive(Debug)]
 pub struct PackageNode<F: MoveFlavor> {
-    package: Package<F>,
+    pub package: Package<F>,
     pinned_dep: PinnedDependencyInfo,
 }
 
@@ -190,6 +190,10 @@ impl<F: MoveFlavor> PackageGraph<F> {
         new_pinned_deps.insert(env.clone(), DependencyInfo { data });
 
         Ok(new_pinned_deps)
+    }
+
+    pub fn nodes(&self) -> Vec<&Arc<PackageNode<F>>> {
+        self.inner.node_weights().collect()
     }
 }
 

@@ -4,7 +4,12 @@
 
 use std::path::PathBuf;
 
-use crate::{errors::PackageResult, flavor::Vanilla, package::Package};
+use crate::{
+    compilation::compiled_package::compile,
+    errors::PackageResult,
+    flavor::Vanilla,
+    package::{Package, RootPackage},
+};
 use clap::{Command, Parser, Subcommand};
 
 /// Build the package
@@ -19,9 +24,8 @@ impl Build {
     pub async fn execute(&self) -> PackageResult<()> {
         let path = self.path.clone().unwrap_or_else(|| PathBuf::from("."));
 
-        let package = Package::<Vanilla>::load_root(path).await?;
-
-        // TODO: Implement the actual build logic here.
+        let root_pkg = RootPackage::<Vanilla>::load(path, None).await?;
+        compile::<Vanilla>(root_pkg);
 
         Ok(())
     }

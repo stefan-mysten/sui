@@ -206,6 +206,10 @@ impl<F: MoveFlavor> Manifest<F> {
     pub fn package_name(&self) -> &PackageName {
         self.package.name()
     }
+
+    pub fn edition(&self) -> &str {
+        &self.package.edition.get_ref()
+    }
 }
 
 /// Compute a digest of this input data using SHA-256.
