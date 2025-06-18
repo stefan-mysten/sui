@@ -10,6 +10,8 @@ use crate::{
 
 use move_bytecode_source_map::utils::{serialize_to_json, serialize_to_json_string};
 
+use move_binary_format::CompiledModule;
+use move_bytecode_utils::Modules;
 use move_command_line_common::files::{
     DEBUG_INFO_EXTENSION, MOVE_BYTECODE_EXTENSION, MOVE_COMPILED_EXTENSION, MOVE_EXTENSION,
     find_move_filenames,
@@ -27,7 +29,7 @@ use move_package::compilation::{
 use move_symbol_pool::Symbol;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashSet},
     fmt,
     path::{Path, PathBuf},
 };
@@ -38,14 +40,85 @@ pub struct BuildConfig {
 }
 
 pub struct CompiledPackage {
-    /// The path to the compiled package
-    pub path: String,
-
-    /// The dependencies of the package
-    pub dependencies: BTreeMap<EnvironmentName, DependencyInfo>,
+    compiled_package_info: CompiledPackageInfo,
+    root_compiled_units: Vec<CompiledUnitWithSource>,
+    deps_compiled_units: Vec<(Symbol, CompiledUnitWithSource)>,
+    // root_pkg_path: Path,
 }
 
-pub fn compile<F: MoveFlavor>(root_pkg: RootPackage<F>) {
+impl CompiledPackage {
+    pub fn get_all_compiled_units_with_source(
+        &self,
+    ) -> impl Iterator<Item = &CompiledUnitWithSource> {
+        self.root_compiled_units
+            .iter()
+            .chain(self.deps_compiled_units.iter().map(|(_, unit)| unit))
+    }
+    pub fn get_modules_and_deps(&self) -> impl Iterator<Item = &CompiledModule> {
+        self.get_all_compiled_units_with_source()
+            .map(|m| &m.unit.module)
+        // TODO we're ditching bytecode deps support, so maybe this is not needed.
+        // .chain(self.bytecode_deps.iter().map(|(_, m)| m))
+        // this might need a chain with bytecode_deps.
+    }
+
+    pub fn root_modules_map(&self) -> Modules {
+        Modules::new(
+            self.root_compiled_units
+                .iter()
+                .map(|unit| &unit.unit.module),
+        )
+    }
+
+    /// Return the bytecode modules in this package, topologically sorted in dependency order.
+    /// Optionally include dependencies that have not been published (are at address 0x0), if
+    /// `with_unpublished_deps` is true. This is the function to call if you would like to publish
+    /// or statically analyze the modules.
+    pub fn get_dependency_sorted_modules(&self) -> Vec<CompiledModule> {
+        let all_modules = Modules::new(self.get_modules_and_deps());
+
+        // SAFETY: package built successfully
+        let modules = all_modules.compute_topological_order().unwrap();
+
+        // Collect all module IDs from the current package to be published (module names are not
+        // sufficient as we may have modules with the same names in user code and in Sui
+        // framework which would result in the latter being pulled into a set of modules to be
+        // published).
+        let self_modules: HashSet<_> = self
+            .root_modules_map()
+            .iter_modules()
+            .iter()
+            .map(|m| m.self_id())
+            .collect();
+
+        modules
+            .filter(|module| self_modules.contains(&module.self_id()))
+            .cloned()
+            .collect()
+    }
+
+    /// Return a serialized representation of the bytecode modules in this package, topologically sorted in dependency order
+    pub fn get_package_bytes(&self) -> Vec<Vec<u8>> {
+        self.get_dependency_sorted_modules()
+            .iter()
+            .map(|m| {
+                let mut bytes = Vec::new();
+                m.serialize_with_version(m.version, &mut bytes).unwrap(); // safe because package built successfully
+                bytes
+            })
+            .collect()
+    }
+
+    // /// Return the base64-encoded representation of the bytecode modules in this package, topologically sorted in dependency order
+    // pub fn get_package_base64(&self) -> Vec<Base64> {
+    //     self.get_package_bytes()
+    //         .iter()
+    //         .map(|b| Base64::from_bytes(b))
+    //         .collect()
+    // }
+}
+
+pub fn compile<F: MoveFlavor>(root_pkg: RootPackage<F>) -> Option<CompiledPackage> {
     let pkgs = BTreeSet::from(["Sui", "SuiSystem", "MoveStdlib"]);
     let default_addresses = BTreeMap::from([
         (
@@ -63,6 +136,7 @@ pub fn compile<F: MoveFlavor>(root_pkg: RootPackage<F>) {
     ]);
 
     let mut starting_addr = 9010;
+
     let mut named_address_map: BTreeMap<Symbol, NumericalAddress> = BTreeMap::new();
     let root_pkg_paths = find_move_filenames(&[root_pkg.package_path().path().as_path()], false)
         .unwrap()
@@ -179,36 +253,45 @@ pub fn compile<F: MoveFlavor>(root_pkg: RootPackage<F>) {
         let under_path = root_pkg.package_path().path().join("build");
 
         save_to_disk(
-            root_compiled_units,
-            compiled_package_info,
-            deps_compiled_units,
+            root_compiled_units.clone(),
+            compiled_package_info.clone(),
+            deps_compiled_units.clone(),
             root_pkg,
             under_path,
         );
 
-        //
-        // let (files, units_res) = data.unwrap();
-        // match units_res {
-        //     Ok((units, warning_diags)) => {
-        //         decorate_warnings(warning_diags, Some(&files));
-        //         fn_info = Some(Self::fn_info(&units));
-        //         Ok((files, units))
-        //     }
-        //     Err(error_diags) => {
-        //         // with errors present don't even try decorating warnings output to avoid
-        //         // clutter
-        //         assert!(!error_diags.is_empty());
-        //         let diags_buf =
-        //             report_diagnostics_to_buffer(&files, error_diags, /* color */ true);
-        //         if let Err(err) = std::io::stderr().write_all(&diags_buf) {
-        //             anyhow::bail!("Cannot output compiler diagnostics: {}", err);
-        //         }
-        //         anyhow::bail!("Compilation error");
-        //     }
-        // }
-
-        // println!("Compiled package data: {:?}", data.unwrap().1.unwrap_err());
+        Some(CompiledPackage {
+            compiled_package_info,
+            root_compiled_units,
+            deps_compiled_units,
+            // root_pkg_path: root_pkg.package_path().path().as_path(),
+        })
+    } else {
+        None
     }
+
+    //
+    // let (files, units_res) = data.unwrap();
+    // match units_res {
+    //     Ok((units, warning_diags)) => {
+    //         decorate_warnings(warning_diags, Some(&files));
+    //         fn_info = Some(Self::fn_info(&units));
+    //         Ok((files, units))
+    //     }
+    //     Err(error_diags) => {
+    //         // with errors present don't even try decorating warnings output to avoid
+    //         // clutter
+    //         assert!(!error_diags.is_empty());
+    //         let diags_buf =
+    //             report_diagnostics_to_buffer(&files, error_diags, /* color */ true);
+    //         if let Err(err) = std::io::stderr().write_all(&diags_buf) {
+    //             anyhow::bail!("Cannot output compiler diagnostics: {}", err);
+    //         }
+    //         anyhow::bail!("Compilation error");
+    //     }
+    // }
+
+    // println!("Compiled package data: {:?}", data.unwrap().1.unwrap_err());
 }
 
 fn find_default_address<'a>(

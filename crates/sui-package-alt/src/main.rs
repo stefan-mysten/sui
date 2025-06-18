@@ -1,3 +1,11 @@
+// Copyright (c) Mysten Labs, Inc.
+// SPDX-License-Identifier: Apache-2.0
+
+use clap::{Parser, Subcommand};
+use move_package_alt::errors::PackageResult;
+
+use sui_package_alt::{Build, Publish};
+
 #[derive(Debug, Parser, Clone)]
 #[command(version, about, long_about = None)]
 pub struct Cli {
@@ -15,7 +23,7 @@ impl Commands {
     pub async fn execute(&self) -> PackageResult<()> {
         match self {
             Commands::Build(b) => b.execute().await,
-            Commands::Publish(u) => p.execute().await,
+            Commands::Publish(p) => p.execute().await,
         }
     }
 }

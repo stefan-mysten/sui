@@ -1,14 +1,15 @@
+// Copyright (c) Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
 use std::path::PathBuf;
 
-use crate::{
+use clap::{Command, Parser, Subcommand};
+use move_package_alt::{
     compilation::compiled_package::compile,
     errors::PackageResult,
     flavor::Vanilla,
     package::{Package, RootPackage},
 };
-use clap::{Command, Parser, Subcommand};
 
 /// Build the package
 #[derive(Debug, Clone, Parser)]

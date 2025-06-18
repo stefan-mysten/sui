@@ -8201,7 +8201,9 @@ dependencies = [
  "dunce",
  "futures",
  "itertools 0.10.5",
+ "move-binary-format",
  "move-bytecode-source-map",
+ "move-bytecode-utils",
  "move-command-line-common",
  "move-compiler",
  "move-core-types",
@@ -15414,6 +15416,9 @@ dependencies = [
  "clap",
  "move-package-alt",
  "serde",
+ "sui-config",
+ "sui-sdk",
+ "tokio",
 ]
 
 [[package]]
