@@ -15411,9 +15411,9 @@ dependencies = [
 name = "sui-package-alt"
 version = "1.51.0"
 dependencies = [
+ "clap",
  "move-package-alt",
  "serde",
- "sui-types",
 ]
 
 [[package]]

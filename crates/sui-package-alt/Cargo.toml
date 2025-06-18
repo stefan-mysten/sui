@@ -10,5 +10,6 @@ edition = "2021"
 workspace = true
 
 [dependencies]
+clap.workspace = true
 move-package-alt.workspace = true
 serde.workspace = true

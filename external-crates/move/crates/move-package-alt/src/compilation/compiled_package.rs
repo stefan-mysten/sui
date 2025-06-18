@@ -110,6 +110,7 @@ pub fn compile<F: MoveFlavor>(root_pkg: RootPackage<F>) {
                         flavor: move_compiler::editions::Flavor::Sui,
                         edition: move_compiler::editions::Edition {
                             edition: root_pkg.edition().into(),
+                            // TODO: should we have this as a field?
                             release: None,
                         },
                     },
@@ -175,12 +176,14 @@ pub fn compile<F: MoveFlavor>(root_pkg: RootPackage<F>) {
             },
         };
 
+        let under_path = root_pkg.package_path().path().join("build");
+
         save_to_disk(
             root_compiled_units,
             compiled_package_info,
             deps_compiled_units,
             root_pkg,
-            PathBuf::from(".").join("build"),
+            under_path,
         );
 
         //
