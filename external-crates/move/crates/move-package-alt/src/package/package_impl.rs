@@ -79,7 +79,10 @@ impl<F: MoveFlavor> Package<F> {
     fn load_published_info_from_lockfile(
         path: &PackagePath,
     ) -> PackageResult<BTreeMap<EnvironmentName, PublishInformation<F>>> {
+        println!("Path {:?}", path);
         let lockfile = Lockfiles::<F>::read_from_dir(path)?;
+
+        println!("Loaded lockfile: {lockfile:?}");
 
         let publish_data = lockfile
             .map(|l| l.published().clone())
@@ -118,6 +121,10 @@ impl<F: MoveFlavor> Package<F> {
 
     pub fn dep_for_self(&self) -> &LockfileDependencyInfo {
         &self.source
+    }
+
+    pub fn publish_data(&self) -> &BTreeMap<EnvironmentName, PublishInformation<F>> {
+        &self.publish_data
     }
 
     /// The resolved and pinned dependencies from the manifest for environment `env`

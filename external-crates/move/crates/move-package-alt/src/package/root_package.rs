@@ -137,19 +137,6 @@ impl<F: MoveFlavor + fmt::Debug> RootPackage<F> {
         &self.dependencies
     }
 
-    pub fn direct_dependencies_by_env(
-        &self,
-        env: &EnvironmentName,
-    ) -> PackageResult<BTreeMap<PackageName, PinnedDependencyInfo>> {
-        let deps = self.dependencies.get(env);
-
-        if let Some(deps) = deps {
-            deps.direct_deps(self.package_name());
-        }
-
-        Ok(BTreeMap::new())
-    }
-
     /// Create a [`Lockfile`] with the current package's dependencies. The lockfile will have no
     /// published information.
     pub async fn dependencies_to_lockfile(&self) -> PackageResult<ParsedLockfile<F>> {

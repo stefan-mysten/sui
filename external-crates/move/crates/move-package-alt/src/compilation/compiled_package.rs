@@ -5,9 +5,7 @@
 use crate::{
     flavor::MoveFlavor,
     graph::PackageGraph,
-    package::{
-        EnvironmentName, Package, RootPackage, lockfile::DependencyInfo, paths::PackagePath,
-    },
+    package::{EnvironmentName, Package, RootPackage, paths::PackagePath},
 };
 
 use move_bytecode_source_map::utils::{serialize_to_json, serialize_to_json_string};
@@ -48,6 +46,7 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
 };
+use tracing::debug;
 
 /// References file for documentation generation
 pub const REFERENCE_TEMPLATE_FILENAME: &str = "references.md";
@@ -443,7 +442,7 @@ pub async fn compile<F: MoveFlavor>(
     let mut starting_addr = 9010;
 
     let mut named_address_map: BTreeMap<Symbol, NumericalAddress> = BTreeMap::new();
-    let root_pkg_paths = find_move_filenames(&[root_pkg.package_path().path().as_path()], false)
+    let root_pkg_paths = find_move_filenames(&[root_pkg.package_path().path()], false)
         .unwrap()
         .into_iter()
         .map(FileName::from)
@@ -457,18 +456,32 @@ pub async fn compile<F: MoveFlavor>(
 
         // Find the source paths for each dependency and build the PackagePaths
         for node in nodes {
-            println!("Building dependency: {}", node.package.name());
-            let sources = get_sources(node.package.path())?;
-            let is_dependency = if node.package.name() == root_pkg.package_name() {
+            println!("Building dependency: {}", node.package().name());
+            let sources = get_sources(node.package().path())?;
+            let is_dependency = if node.package().name() == root_pkg.package_name() {
                 false
             } else {
                 true
             };
 
             starting_addr = starting_addr + 1;
-            let pkg_name: Symbol = node.package.name().as_str().into();
-            let addr = NumericalAddress::parse_str(&format!("0x{starting_addr}")).expect("fine");
-            let named_address_map = if pkgs.contains(node.package.name().as_str()) {
+            let pkg_name: Symbol = node.package().name().as_str().into();
+            let addr = if let Some(n) = node
+                .package()
+                .publish_data()
+                .get(env)
+                .map(|data| data.publication.published_at)
+            {
+                NumericalAddress::new(n.into_bytes(), move_compiler::shared::NumberFormat::Hex)
+            } else {
+                let addr =
+                    NumericalAddress::parse_str(&format!("0x{starting_addr}")).expect("fine");
+                addr
+            };
+
+            println!("Package {} address: {}", pkg_name, addr);
+
+            let named_address_map = if pkgs.contains(node.package().name().as_str()) {
                 default_addresses.clone()
             } else {
                 let mut addresses = BTreeMap::from(default_addresses.clone());
@@ -479,7 +492,7 @@ pub async fn compile<F: MoveFlavor>(
             // TODO: probably here we need to use a different type than Symbol
             let source_package_paths: PackagePaths<Symbol, Symbol> = PackagePaths {
                 name: Some((
-                    node.package.name().as_str().into(),
+                    node.package().name().as_str().into(),
                     PackageConfig {
                         is_dependency: true,
                         warning_filter: WarningFiltersBuilder::new_for_source(),
@@ -747,7 +760,7 @@ fn source_paths_for_config(package_path: &Path) -> Vec<PathBuf> {
 
 // Find all the source files for a package at the given path
 pub fn get_sources(path: &PackagePath) -> Result<Vec<FileName>> {
-    let places_to_look = source_paths_for_config(path.path().as_path());
+    let places_to_look = source_paths_for_config(path.path());
     Ok(find_move_filenames(&places_to_look, false)?
         .into_iter()
         .map(FileName::from)

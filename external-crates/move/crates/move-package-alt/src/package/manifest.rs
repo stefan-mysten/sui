@@ -127,6 +127,10 @@ impl<F: MoveFlavor> Manifest<F> {
         &self.digest
     }
 
+    pub fn edition(&self) -> &str {
+        self.inner.package.edition.as_ref()
+    }
+
     /// Validate the manifest contents, after deserialization.
     ///
     // TODO: add more validation
@@ -198,10 +202,6 @@ impl ManifestError {
                 .with_labels(vec![Label::primary(loc.file(), loc.span().clone())])
                 .with_notes(vec![self.to_string()]),
         }
-    }
-
-    pub fn edition(&self) -> &str {
-        &self.package.edition.get_ref()
     }
 }
 
