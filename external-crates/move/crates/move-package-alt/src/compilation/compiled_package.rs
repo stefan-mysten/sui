@@ -451,21 +451,10 @@ pub async fn compile<F: MoveFlavor>(
     let program_info_hook = SaveHook::new([SaveFlag::TypingInfo]);
 
     if let Some(dependency_graph) = &root_pkg.dependencies().get(env) {
-        let mut dependencies_paths = vec![];
-        let nodes = dependency_graph.nodes();
-
-        // Find the source paths for each dependency and build the PackagePaths
-        for node in nodes {
-            println!("Building dependency: {}", node.package().name());
-            let sources = get_sources(node.package().path())?;
-            let is_dependency = if node.package().name() == root_pkg.package_name() {
-                false
-            } else {
-                true
-            };
-
+        for node in dependency_graph.nodes() {
             starting_addr = starting_addr + 1;
             let pkg_name: Symbol = node.package().name().as_str().into();
+            println!("Publish data {:?}", node.package().publish_data());
             let addr = if let Some(n) = node
                 .package()
                 .publish_data()
@@ -481,12 +470,24 @@ pub async fn compile<F: MoveFlavor>(
 
             println!("Package {} address: {}", pkg_name, addr);
 
-            let named_address_map = if pkgs.contains(node.package().name().as_str()) {
-                default_addresses.clone()
+            named_address_map.insert(pkg_name, addr);
+        }
+    }
+    println!("Env {:?}", env);
+    println!("Named address map: {:#?}", named_address_map);
+
+    if let Some(dependency_graph) = &root_pkg.dependencies().get(env) {
+        let mut dependencies_paths = vec![];
+        let nodes = dependency_graph.nodes();
+
+        // Find the source paths for each dependency and build the PackagePaths
+        for node in nodes {
+            println!("Building dependency: {}", node.package().name());
+            let sources = get_sources(node.package().path())?;
+            let is_dependency = if node.package().name() == root_pkg.package_name() {
+                false
             } else {
-                let mut addresses = BTreeMap::from(default_addresses.clone());
-                addresses.extend([(pkg_name, addr)]);
-                addresses
+                true
             };
 
             // TODO: probably here we need to use a different type than Symbol
@@ -506,12 +507,14 @@ pub async fn compile<F: MoveFlavor>(
                         },
                     },
                 )),
-                named_address_map,
+                named_address_map: named_address_map.clone(),
                 paths: sources,
             };
 
             dependencies_paths.push(source_package_paths);
         }
+
+        println!("Dependencies paths: {:#?}", dependencies_paths);
 
         // Compile the root package and its dependencies
         let compiler =
@@ -519,6 +522,7 @@ pub async fn compile<F: MoveFlavor>(
         let compiler = compiler.add_save_hook(&program_info_hook);
 
         let (files, units_res) = compiler.build()?;
+        std::process::exit(0);
         let data: (MappedFiles, Vec<_>) = match units_res {
             Ok((units, warning_diags)) => {
                 decorate_warnings(warning_diags, Some(&files));

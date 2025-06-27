@@ -21,7 +21,12 @@ pub struct Publish {
     #[arg(name = "path", short = 'p', long = "path", default_value = ".")]
     path: Option<PathBuf>,
 
-    #[arg(name = "path", short = 'p', long = "path", default_value = "testnet")]
+    #[arg(
+        name = "env",
+        short = 'e',
+        long = "environment",
+        default_value = "testnet"
+    )]
     env: Option<String>,
 }
 
@@ -63,6 +68,8 @@ impl Publish {
         .await
         .unwrap();
         let compiled_modules = compiled_package.get_package_bytes();
+
+        println!("Compiled modules {:?}", compiled_modules);
 
         // figure out the dependency ids - the package's addresses
         // let dep_ids = compiled_package.get_published_dependencies_ids();
