@@ -468,7 +468,6 @@ pub async fn compile<F: MoveFlavor>(
             } else {
                 node.package().name().as_str().into()
             };
-            println!("Package {} address: {}", pkg_name, addr);
             named_address_map.insert(pkg_name, addr);
         }
     }
@@ -483,7 +482,7 @@ pub async fn compile<F: MoveFlavor>(
         ),
     );
 
-    println!("Named address map: {:#?}", named_address_map);
+    debug!("Named address map: {:#?}", named_address_map);
 
     if let Some(dependency_graph) = &root_pkg.dependencies().get(env) {
         let mut dependencies_paths = vec![];
@@ -499,12 +498,17 @@ pub async fn compile<F: MoveFlavor>(
                 true
             };
 
+            debug!(
+                "Node: {:?}, is dependency: {is_dependency}",
+                node.package().name()
+            );
+
             // TODO: probably here we need to use a different type than Symbol
             let source_package_paths: PackagePaths<Symbol, Symbol> = PackagePaths {
                 name: Some((
                     node.package().name().as_str().into(),
                     PackageConfig {
-                        is_dependency: true,
+                        is_dependency,
                         warning_filter: WarningFiltersBuilder::new_for_source(),
                         // TODO: we need to use this probably in the manifest for deserialization
                         flavor: move_compiler::editions::Flavor::Sui,
@@ -522,6 +526,8 @@ pub async fn compile<F: MoveFlavor>(
 
             dependencies_paths.push(source_package_paths);
         }
+
+        debug!("Source package paths: {:#?}", dependencies_paths);
 
         // Compile the root package and its dependencies
         let compiler =

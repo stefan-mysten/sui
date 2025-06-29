@@ -94,8 +94,8 @@ impl Publish {
             .map(|x| x.into())
             .collect();
 
-        println!("Compiled modules {:?}", compiled_modules);
-        println!("Dependency IDs {:?}", dep_ids);
+        debug!("Compiled modules {:?}", compiled_modules);
+        debug!("Dependency IDs {:?}", dep_ids);
         println!("Package compiled successfully.");
 
         // create the publish tx kind
@@ -118,7 +118,7 @@ pub(crate) async fn dry_run_or_execute_or_serialize(
 
     let client = context.get_client().await?;
 
-    let gas_budget = 5000000;
+    let gas_budget = 50000000;
 
     let gas_payment = {
         let input_objects: Vec<_> = tx_kind

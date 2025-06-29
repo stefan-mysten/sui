@@ -911,8 +911,11 @@ pub(crate) fn make_source_and_deps_for_compiler(
             ),
         )),
         paths: sources,
-        named_address_map: root_named_addrs,
+        named_address_map: root_named_addrs.clone(),
     };
+    println!("Old: root pkg {:?}", root);
+    println!("Old: named_address_map {:?}", root_named_addrs);
+    println!("Old: source_package_paths {:?}", source_package_paths);
     Ok((source_package_paths, deps_package_paths))
 }
 
