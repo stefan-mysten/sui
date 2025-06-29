@@ -15432,12 +15432,17 @@ dependencies = [
 name = "sui-package-alt"
 version = "1.52.0"
 dependencies = [
+ "anyhow",
  "clap",
  "move-package-alt",
  "serde",
+ "shared-crypto",
  "sui-config",
+ "sui-json-rpc-types",
+ "sui-keys",
  "sui-sdk",
  "tokio",
+ "tracing",
 ]
 
 [[package]]

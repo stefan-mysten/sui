@@ -9,6 +9,7 @@ use crate::{
 };
 
 use move_bytecode_source_map::utils::{serialize_to_json, serialize_to_json_string};
+use move_core_types::account_address::AccountAddress;
 
 use anyhow::{Result, bail};
 use clap::Parser;
@@ -51,11 +52,6 @@ use tracing::debug;
 /// References file for documentation generation
 pub const REFERENCE_TEMPLATE_FILENAME: &str = "references.md";
 
-// #[derive(Debug, Serialize, Deserialize, Clone)]
-// pub struct BuildConfig {
-//     pub save_disassembly: bool,
-//     pub save_docs: bool,
-// }
 #[derive(Debug, Parser, Clone, Serialize, Deserialize, Eq, PartialEq, PartialOrd, Default)]
 #[clap(about)]
 pub struct BuildConfig {
@@ -166,6 +162,7 @@ pub struct CompiledPackage<F: MoveFlavor> {
     root_compiled_units: Vec<CompiledUnitWithSource>,
     deps_compiled_units: Vec<(Symbol, CompiledUnitWithSource)>,
     compiled_docs: Option<Vec<(String, String)>>,
+    published_ids: Vec<AccountAddress>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -266,7 +263,9 @@ impl<F: MoveFlavor> CompiledPackage<F> {
             .collect()
     }
 
-    pub fn dependency_ids(&self) {}
+    pub fn dependency_ids(&self) -> Vec<AccountAddress> {
+        self.published_ids.clone()
+    }
 }
 
 impl OnDiskCompiledPackage {
@@ -424,19 +423,10 @@ pub async fn compile<F: MoveFlavor>(
     env: &EnvironmentName,
 ) -> Result<CompiledPackage<F>> {
     let pkgs = BTreeSet::from(["Sui", "SuiSystem", "MoveStdlib"]);
-    let default_addresses = BTreeMap::from([
-        (
-            Symbol::from("std"),
-            NumericalAddress::parse_str("0x1").unwrap(),
-        ),
-        (
-            Symbol::from("sui"),
-            NumericalAddress::parse_str("0x2").unwrap(),
-        ),
-        (
-            Symbol::from("sui_system"),
-            NumericalAddress::parse_str("0x3").unwrap(),
-        ),
+    let names = BTreeMap::from([
+        ("Sui", "sui"),
+        ("SuiSystem", "sui_system"),
+        ("MoveStdlib", "std"),
     ]);
 
     let mut starting_addr = 9010;
@@ -450,30 +440,49 @@ pub async fn compile<F: MoveFlavor>(
 
     let program_info_hook = SaveHook::new([SaveFlag::TypingInfo]);
 
+    let mut published_ids = vec![];
+
     if let Some(dependency_graph) = &root_pkg.dependencies().get(env) {
         for node in dependency_graph.nodes() {
-            starting_addr = starting_addr + 1;
-            let pkg_name: Symbol = node.package().name().as_str().into();
-            println!("Publish data {:?}", node.package().publish_data());
+            if node.package().name() == root_pkg.package_name() {
+                continue;
+            }
             let addr = if let Some(n) = node
                 .package()
                 .publish_data()
                 .get(env)
                 .map(|data| data.publication.published_at)
             {
+                published_ids.push(n.clone());
                 NumericalAddress::new(n.into_bytes(), move_compiler::shared::NumberFormat::Hex)
             } else {
-                let addr =
-                    NumericalAddress::parse_str(&format!("0x{starting_addr}")).expect("fine");
-                addr
+                bail!(
+                    "No published address for package {} in env {}",
+                    node.package().name(),
+                    env
+                )
             };
 
+            let pkg_name: Symbol = if names.contains_key(&node.name().as_str()) {
+                (*names.get(node.name().as_str()).unwrap()).into()
+            } else {
+                node.package().name().as_str().into()
+            };
             println!("Package {} address: {}", pkg_name, addr);
-
             named_address_map.insert(pkg_name, addr);
         }
     }
-    println!("Env {:?}", env);
+
+    named_address_map.insert(
+        root_pkg.package_name().as_str().into(),
+        NumericalAddress::new(
+            AccountAddress::from_hex_literal("0x0")
+                .unwrap()
+                .into_bytes(),
+            move_compiler::shared::NumberFormat::Hex,
+        ),
+    );
+
     println!("Named address map: {:#?}", named_address_map);
 
     if let Some(dependency_graph) = &root_pkg.dependencies().get(env) {
@@ -514,15 +523,12 @@ pub async fn compile<F: MoveFlavor>(
             dependencies_paths.push(source_package_paths);
         }
 
-        println!("Dependencies paths: {:#?}", dependencies_paths);
-
         // Compile the root package and its dependencies
         let compiler =
             move_compiler::Compiler::from_package_paths(None, dependencies_paths, vec![])?;
         let compiler = compiler.add_save_hook(&program_info_hook);
 
         let (files, units_res) = compiler.build()?;
-        std::process::exit(0);
         let data: (MappedFiles, Vec<_>) = match units_res {
             Ok((units, warning_diags)) => {
                 decorate_warnings(warning_diags, Some(&files));
@@ -635,6 +641,7 @@ pub async fn compile<F: MoveFlavor>(
             root_compiled_units,
             deps_compiled_units,
             compiled_docs: None,
+            published_ids,
             // compiled_docs,
             root_pkg,
         };
