@@ -6,10 +6,11 @@ use std::path::PathBuf;
 use crate::SuiFlavor;
 use clap::{Command, Parser, Subcommand};
 use move_package_alt::{
-    compilation::build_config::BuildConfig,
-    compilation::compiled_package::compile,
     errors::PackageResult,
     package::{Package, RootPackage},
+};
+use move_package_compiling::{
+    build_config::BuildConfig, compiled_package::compile, lint_flag::LintFlag,
 };
 
 /// Build the package

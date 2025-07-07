@@ -18,11 +18,11 @@ use crate::{
     SuiFlavor,
 };
 use clap::{Command, Parser, Subcommand};
-use move_package_alt::{
-    compilation::{build_config::BuildConfig, compiled_package::compile, lint_flag::LintFlag},
-    errors::{PackageError, PackageResult},
-};
+use move_package_alt::errors::{PackageError, PackageResult};
 
+use move_package_compiling::{
+    build_config::BuildConfig, compiled_package::compile, lint_flag::LintFlag,
+};
 use shared_crypto::intent::Intent;
 use sui_config::{sui_config_dir, SUI_CLIENT_CONFIG};
 use sui_sdk::{

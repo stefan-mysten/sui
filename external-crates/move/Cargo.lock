@@ -2602,6 +2602,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "move-package-compiling"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap 4.5.28",
+ "dunce",
+ "move-binary-format",
+ "move-bytecode-source-map",
+ "move-bytecode-utils",
+ "move-command-line-common",
+ "move-compiler",
+ "move-core-types",
+ "move-disassembler",
+ "move-docgen",
+ "move-model-2",
+ "move-package-alt",
+ "move-symbol-pool",
+ "serde",
+ "serde_yaml",
+ "tracing",
+]
+
+[[package]]
 name = "move-proc-macros"
 version = "0.1.0"
 dependencies = [

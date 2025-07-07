@@ -2,20 +2,20 @@
 // Copyright (c) The Move Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::{
-    compilation::on_disk_package::OnDiskPackage,
+use move_package_alt::{
     flavor::MoveFlavor,
     package::{EnvironmentName, RootPackage, paths::PackagePath},
 };
 
-use crate::schema::PublishedID;
+use crate::build_config::BuildConfig;
+use crate::on_disk_package::{OnDiskCompiledPackage, OnDiskPackage};
+use move_package_alt::layout::package_layout::CompiledPackageLayout;
+use move_package_alt::layout::source_layout::SourcePackageLayout;
+
+use move_package_alt::schema::PublishedID;
 
 use move_core_types::account_address::AccountAddress;
 
-use super::{
-    build_config::BuildConfig, on_disk_package::OnDiskCompiledPackage,
-    package_layout::CompiledPackageLayout, source_layout::SourcePackageLayout,
-};
 use anyhow::{Result, bail};
 use move_binary_format::CompiledModule;
 use move_bytecode_utils::Modules;
@@ -270,7 +270,7 @@ pub async fn compile<F: MoveFlavor>(
     );
 
     debug!("Named address map: {:#?}", named_address_map);
-// each node should have its own named address map
+    // each node should have its own named address map
 
     if let Some(dependency_graph) = &root_pkg.dependencies().get(env) {
         let mut dependencies_paths = vec![];

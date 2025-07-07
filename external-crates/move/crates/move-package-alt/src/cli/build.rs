@@ -5,7 +5,7 @@
 use std::path::PathBuf;
 
 use crate::{
-    compilation::{build_config::BuildConfig, compiled_package::compile},
+    // compilation::{build_config::BuildConfig, compiled_package::compile},
     errors::PackageResult,
     flavor::Vanilla,
     package::RootPackage,
@@ -26,9 +26,8 @@ pub struct Build {
         default_value = "testnet"
     )]
     env: String,
-
-    #[command(flatten)]
-    build_config: BuildConfig,
+    // #[command(flatten)]
+    // build_config: BuildConfig,
 }
 
 impl Build {
@@ -36,9 +35,9 @@ impl Build {
         let path = self.path.clone().unwrap_or_else(|| PathBuf::from("."));
 
         let root_pkg = RootPackage::<Vanilla>::load(path, None).await?;
-        compile::<Vanilla>(&root_pkg, &self.build_config, &self.env)
-            .await
-            .unwrap();
+        // compile::<Vanilla>(&root_pkg, &self.build_config, &self.env)
+        //     .await
+        //     .unwrap();
 
         Ok(())
     }

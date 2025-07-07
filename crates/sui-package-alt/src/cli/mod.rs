@@ -10,15 +10,16 @@ use anyhow::{anyhow, bail};
 use crate::{sui_flavor::SuiMetadata, SuiFlavor};
 pub use build::Build;
 use move_package_alt::{
-    compilation::{
-        build_config::BuildConfig,
-        compiled_package::{compile, CompiledPackage},
-    },
     errors::PackageError,
     flavor::MoveFlavor,
     package::RootPackage,
     schema::{OriginalID, ParsedLockfile, Publication, PublishedID},
 };
+
+pub use move_package_compiling::build_config::BuildConfig;
+pub use move_package_compiling::compiled_package::compile;
+pub use move_package_compiling::compiled_package::CompiledPackage;
+
 pub use publish::Publish;
 use shared_crypto::intent::Intent;
 use std::{collections::BTreeMap, path::PathBuf};

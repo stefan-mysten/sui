@@ -9,12 +9,12 @@
 #![allow(unused)]
 #![warn(unused_imports)]
 pub mod cli;
-pub mod compilation;
 pub mod dependency;
 pub mod errors;
 pub mod flavor;
 pub mod git;
 pub mod graph;
+pub mod layout;
 pub mod package;
 pub mod schema;
 #[cfg(test)]

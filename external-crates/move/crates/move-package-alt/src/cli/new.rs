@@ -9,7 +9,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::compilation::source_layout::SourcePackageLayout;
+use crate::layout::source_layout::SourcePackageLayout;
 use crate::{errors::PackageResult, package::PackageName};
 use anyhow::Context;
 use clap::Parser;

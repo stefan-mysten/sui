@@ -15,6 +15,7 @@ anyhow.workspace = true
 clap.workspace = true
 move-core-types.workspace = true
 move-package-alt.workspace = true
+move-package-compiling.workspace = true
 serde.workspace = true
 shared-crypto.workspace = true
 sui-config.workspace = true
