@@ -48,23 +48,24 @@ use tracing::debug;
 pub const REFERENCE_TEMPLATE_FILENAME: &str = "references.md";
 
 /// Represents a compiled package in memory.
+#[derive(Clone, Debug)]
 pub struct CompiledPackage {
     /// Meta information about the compilation of this `CompiledPackage`
-    compiled_package_info: CompiledPackageInfo,
+    pub compiled_package_info: CompiledPackageInfo,
     /// The output compiled bytecode in the root package (both module, and scripts) along with its
     /// source file
-    root_compiled_units: Vec<CompiledUnitWithSource>,
+    pub root_compiled_units: Vec<CompiledUnitWithSource>,
     /// The output compiled bytecode for dependencies
-    deps_compiled_units: Vec<(Symbol, CompiledUnitWithSource)>,
+    pub deps_compiled_units: Vec<(Symbol, CompiledUnitWithSource)>,
 
     // Optional artifacts from compilation
     //
     /// filename -> doctext
-    compiled_docs: Option<Vec<(String, String)>>,
+    pub compiled_docs: Option<Vec<(String, String)>>,
     /// The list of published ids for the dependencies of this package
-    deps_published_ids: Vec<PublishedID>,
+    pub deps_published_ids: Vec<PublishedID>,
     /// The mapping of file hashes to file names and contents
-    file_map: MappedFiles,
+    pub file_map: MappedFiles,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -94,6 +95,11 @@ impl CompiledPackage {
         self.root_compiled_units
             .iter()
             .chain(self.deps_compiled_units.iter().map(|(_, unit)| unit))
+    }
+
+    /// `root_compiled_units` filtered over `CompiledUnit::Module`
+    pub fn root_modules(&self) -> impl Iterator<Item = &CompiledUnitWithSource> {
+        self.root_compiled_units.iter()
     }
 
     /// Return an iterator over all bytecode modules in this package, including dependencies
@@ -147,6 +153,43 @@ impl CompiledPackage {
                 bytes
             })
             .collect()
+    }
+    pub fn get_module_by_name(
+        &self,
+        package_name: &str,
+        module_name: &str,
+    ) -> Result<&CompiledUnitWithSource> {
+        if self.compiled_package_info.package_name.as_str() == package_name {
+            return self.get_module_by_name_from_root(module_name);
+        }
+
+        self.deps_compiled_units
+            .iter()
+            .filter(|(dep_package, _)| dep_package.as_str() == package_name)
+            .map(|(_, unit)| unit)
+            .find(|unit| unit.unit.name().as_str() == module_name)
+            .ok_or_else(|| {
+                anyhow::format_err!(
+                    "Unable to find module with name '{}' in package {}",
+                    module_name,
+                    self.compiled_package_info.package_name
+                )
+            })
+    }
+
+    pub fn get_module_by_name_from_root(
+        &self,
+        module_name: &str,
+    ) -> Result<&CompiledUnitWithSource> {
+        self.root_modules()
+            .find(|unit| unit.unit.name().as_str() == module_name)
+            .ok_or_else(|| {
+                anyhow::format_err!(
+                    "Unable to find module with name '{}' in package {}",
+                    module_name,
+                    self.compiled_package_info.package_name
+                )
+            })
     }
 
     /// Return the published ids of the dependencies of this package

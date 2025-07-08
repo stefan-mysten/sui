@@ -237,7 +237,12 @@ impl ValidationMode {
             // only keep modules that are actually used
             let deps_compiled_units: Vec<_> = deps_compiled_units
                 .into_iter()
-                .filter(|pkg| sui_package.dependency_ids.published.contains_key(&pkg.0))
+                .filter(|pkg| {
+                    sui_package
+                        .dependency_ids
+                        .published
+                        .contains_key(&Symbol::from(pkg.0.as_str()))
+                })
                 .collect();
 
             for (package, local_unit) in deps_compiled_units {
@@ -251,7 +256,10 @@ impl ValidationMode {
                     continue;
                 }
 
-                map.insert((address, module), (package, m.module.clone()));
+                map.insert(
+                    (address, module),
+                    (Symbol::from(package.as_str()), m.module.clone()),
+                );
             }
 
             // Include bytecode dependencies.
@@ -263,7 +271,7 @@ impl ValidationMode {
 
                 map.insert(
                     (address, Symbol::from(module.name().as_str())),
-                    (*package, module.clone()),
+                    (Symbol::from(package.as_str()), module.clone()),
                 );
             }
         }

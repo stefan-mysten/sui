@@ -5,8 +5,10 @@
 use clap::Parser;
 use move_cli::base;
 use move_package_compiling::build_config::BuildConfig as MoveBuildConfig;
-use std::{fs, path::Path};
-use sui_move_build::{implicit_deps, BuildConfig};
+use std::{fs, marker::PhantomData, path::Path};
+// use sui_move_build::{implicit_deps, BuildConfig};
+use move_package_alt::flavor::MoveFlavor;
+use sui_move_build::BuildConfig;
 use sui_package_management::system_package_versions::latest_system_packages;
 
 const LAYOUTS_DIR: &str = "layouts";
@@ -69,23 +71,23 @@ impl Build {
         }
         .build(rerooted_path)?;
 
-        if generate_struct_layouts {
-            let layout_str = serde_yaml::to_string(&pkg.generate_struct_layouts()).unwrap();
-            // store under <package_path>/build/<package_name>/layouts/struct_layouts.yaml
-            let dir_name = rerooted_path
-                .join("build")
-                .join(pkg.package.compiled_package_info.package_name.as_str())
-                .join(LAYOUTS_DIR);
-            let layout_filename = dir_name.join(STRUCT_LAYOUTS_FILENAME);
-            fs::create_dir_all(dir_name)?;
-            fs::write(layout_filename, layout_str)?
-        }
-
-        pkg.package
-            .compiled_package_info
-            .build_flags
-            .update_lock_file_toolchain_version(rerooted_path, env!("CARGO_PKG_VERSION").into())?;
-
+        // if generate_struct_layouts {
+        //     let layout_str = serde_yaml::to_string(&pkg.generate_struct_layouts()).unwrap();
+        //     // store under <package_path>/build/<package_name>/layouts/struct_layouts.yaml
+        //     let dir_name = rerooted_path
+        //         .join("build")
+        //         .join(pkg.package.compiled_package_info.package_name.as_str())
+        //         .join(LAYOUTS_DIR);
+        //     let layout_filename = dir_name.join(STRUCT_LAYOUTS_FILENAME);
+        //     fs::create_dir_all(dir_name)?;
+        //     fs::write(layout_filename, layout_str)?
+        // }
+        //
+        // pkg.package
+        //     .compiled_package_info
+        //     .build_flags
+        //     .update_lock_file_toolchain_version(rerooted_path, env!("CARGO_PKG_VERSION").into())?;
+        //
         Ok(())
     }
 }

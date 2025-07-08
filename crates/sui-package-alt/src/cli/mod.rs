@@ -207,7 +207,7 @@ async fn compile_package(
         bail!("The chain id in the environment '{}' does not match the chain id of the connected network. Please check your Move.toml and ensure that the chain id matches the connected network.", env)
     }
 
-    let compiled_package = compile::<SuiFlavor>(&root_pkg, build_config, env).await?;
+    let compiled_package = compile::<SuiFlavor>(&path.as_path(), build_config).await?;
 
     root_pkg
         .update_deps_and_write_to_lockfile(&BTreeMap::from([(env.clone(), chain_id.to_owned())]))
