@@ -14,7 +14,9 @@ use move_compiler::{
     unit_test::{TestPlan, plan_builder::construct_test_plan},
 };
 use move_coverage::coverage_map::{CoverageMap, output_map_to_file};
-use move_package::{BuildConfig, compilation::build_plan::BuildPlan};
+// use move_package::compilation::build_plan::BuildPlan;
+
+use move_package_compiling::build_config::BuildConfig;
 use move_unit_test::UnitTestingConfig;
 use move_vm_test_utils::gas_schedule::CostTable;
 use std::{io::Write, path::Path, process::ExitStatus};
@@ -75,34 +77,34 @@ pub struct Test {
 }
 
 impl Test {
-    pub fn execute(
-        self,
-        path: Option<&Path>,
-        config: BuildConfig,
-        natives: Vec<NativeFunctionRecord>,
-        cost_table: Option<CostTable>,
-    ) -> anyhow::Result<()> {
-        let rerooted_path = reroot_path(path)?;
-        let compute_coverage = self.compute_coverage;
-        // save disassembly if trace execution is enabled
-        let save_disassembly = self.trace_execution;
-        let result = run_move_unit_tests(
-            &rerooted_path,
-            config,
-            self.unit_test_config(),
-            natives,
-            cost_table,
-            compute_coverage,
-            save_disassembly,
-            &mut std::io::stdout(),
-        )?;
-
-        // Return a non-zero exit code if any test failed
-        if let (UnitTestResult::Failure, _) = result {
-            std::process::exit(1)
-        }
-        Ok(())
-    }
+    // pub fn execute(
+    //     self,
+    //     path: Option<&Path>,
+    //     config: BuildConfig,
+    //     natives: Vec<NativeFunctionRecord>,
+    //     cost_table: Option<CostTable>,
+    // ) -> anyhow::Result<()> {
+    //     let rerooted_path = reroot_path(path)?;
+    //     let compute_coverage = self.compute_coverage;
+    //     // save disassembly if trace execution is enabled
+    //     let save_disassembly = self.trace_execution;
+    //     let result = run_move_unit_tests(
+    //         &rerooted_path,
+    //         config,
+    //         self.unit_test_config(),
+    //         natives,
+    //         cost_table,
+    //         compute_coverage,
+    //         save_disassembly,
+    //         &mut std::io::stdout(),
+    //     )?;
+    //
+    //     // Return a non-zero exit code if any test failed
+    //     if let (UnitTestResult::Failure, _) = result {
+    //         std::process::exit(1)
+    //     }
+    //     Ok(())
+    // }
 
     pub fn unit_test_config(self) -> UnitTestingConfig {
         let Self {
@@ -139,129 +141,129 @@ pub enum UnitTestResult {
     Failure,
 }
 
-pub fn run_move_unit_tests<W: Write + Send>(
-    pkg_path: &Path,
-    mut build_config: move_package::BuildConfig,
-    mut unit_test_config: UnitTestingConfig,
-    natives: Vec<NativeFunctionRecord>,
-    cost_table: Option<CostTable>,
-    compute_coverage: bool,
-    save_disassembly: bool,
-    writer: &mut W,
-) -> Result<(UnitTestResult, Option<Diagnostics>)> {
-    let mut test_plan = None;
-    build_config.test_mode = true;
-    build_config.dev_mode = true;
-    build_config.save_disassembly = save_disassembly;
-
-    // Build the resolution graph (resolution graph diagnostics are only needed for CLI commands so
-    // ignore them by passing a vector as the writer)
-    let resolution_graph =
-        build_config.resolution_graph_for_package(pkg_path, None, &mut Vec::new())?;
-
-    // Note: unit_test_config.named_address_values is always set to vec![] (the default value) before
-    // being passed in.
-    unit_test_config.named_address_values = resolution_graph
-        .extract_named_address_mapping()
-        .map(|(name, addr)| {
-            (
-                name.to_string(),
-                NumericalAddress::new(addr.into_bytes(), NumberFormat::Hex),
-            )
-        })
-        .collect();
-
-    let binary_config = BinaryConfig::new_unpublishable();
-
-    // Collect all the bytecode modules that are dependencies of the package. We need to do this
-    // because they're not returned by the compilation result, but we need to add them in the
-    // VM storage.
-    let mut bytecode_deps_modules = vec![];
-    for pkg in resolution_graph.package_table.values() {
-        let source_available = !pkg
-            .get_sources(&resolution_graph.build_options)
-            .unwrap()
-            .is_empty();
-        if source_available {
-            continue;
-        }
-        for bytes in pkg.get_bytecodes_bytes()? {
-            let module = CompiledModule::deserialize_with_config(&bytes, &binary_config)?;
-            bytecode_deps_modules.push(module);
-        }
-    }
-
-    let root_package = resolution_graph.root_package();
-    let build_plan = BuildPlan::create(&resolution_graph)?;
-
-    // Compile the package. We need to intercede in the compilation, process being performed by the
-    // Move package system, to first grab the compilation env, construct the test plan from it, and
-    // then save it, before resuming the rest of the compilation and returning the results and
-    // control back to the Move package system.
-    let mut warning_diags = None;
-    build_plan.compile_with_driver(writer, |compiler| {
-        let (files, comments_and_compiler_res) = compiler.run::<PASS_CFGIR>().unwrap();
-        let compiler =
-            diagnostics::unwrap_or_report_pass_diagnostics(&files, comments_and_compiler_res);
-        let (compiler, cfgir) = compiler.into_ast();
-        let compilation_env = compiler.compilation_env();
-        let built_test_plan = construct_test_plan(compilation_env, Some(root_package), &cfgir);
-        let mapped_files = compilation_env.mapped_files().clone();
-
-        let compilation_result = compiler.at_cfgir(cfgir).build();
-        let (units, warnings) =
-            diagnostics::unwrap_or_report_pass_diagnostics(&files, compilation_result);
-        diagnostics::report_warnings(&files, warnings.clone());
-        let named_units: Vec<_> = units
-            .clone()
-            .into_iter()
-            .map(|unit| unit.named_module)
-            .collect();
-        test_plan = Some((built_test_plan, mapped_files, named_units));
-        warning_diags = Some(warnings);
-        Ok((files, units))
-    })?;
-
-    let (test_plan, mapped_files, units) = test_plan.unwrap();
-    let test_plan = test_plan.unwrap();
-    let no_tests = test_plan.is_empty();
-    let test_plan = TestPlan::new(test_plan, mapped_files, units, bytecode_deps_modules);
-
-    let trace_path = pkg_path.join(".trace");
-    let coverage_map_path = pkg_path
-        .join(".coverage_map")
-        .with_extension(MOVE_COVERAGE_MAP_EXTENSION);
-    let cleanup_trace = || {
-        if compute_coverage && trace_path.exists() {
-            std::fs::remove_file(&trace_path).unwrap();
-        }
-    };
-
-    cleanup_trace();
-
-    // If we need to compute test coverage set the VM tracking environment variable since we will
-    // need this trace to construct the coverage information.
-    if compute_coverage {
-        unsafe { std::env::set_var("MOVE_VM_TRACE", &trace_path) };
-    }
-
-    // Run the tests. If any of the tests fail, then we don't produce a coverage report, so cleanup
-    // the trace files.
-    if !unit_test_config
-        .run_and_report_unit_tests(test_plan, Some(natives), cost_table, writer)?
-        .1
-    {
-        cleanup_trace();
-        return Ok((UnitTestResult::Failure, warning_diags));
-    }
-
-    // Compute the coverage map. This will be used by other commands after this.
-    if compute_coverage && !no_tests {
-        let coverage_map = CoverageMap::from_trace_file(trace_path);
-        output_map_to_file(coverage_map_path, &coverage_map).unwrap();
-    }
-    Ok((UnitTestResult::Success, warning_diags))
-}
+// pub fn run_move_unit_tests<W: Write + Send>(
+//     pkg_path: &Path,
+//     mut build_config: move_package_compiling::build_config::BuildConfig,
+//     mut unit_test_config: UnitTestingConfig,
+//     natives: Vec<NativeFunctionRecord>,
+//     cost_table: Option<CostTable>,
+//     compute_coverage: bool,
+//     save_disassembly: bool,
+//     writer: &mut W,
+// ) -> Result<(UnitTestResult, Option<Diagnostics>)> {
+//     let mut test_plan = None;
+//     build_config.test_mode = true;
+//     build_config.dev_mode = true;
+//     build_config.save_disassembly = save_disassembly;
+//
+//     // Build the resolution graph (resolution graph diagnostics are only needed for CLI commands so
+//     // ignore them by passing a vector as the writer)
+//     let resolution_graph =
+//         build_config.resolution_graph_for_package(pkg_path, None, &mut Vec::new())?;
+//
+//     // Note: unit_test_config.named_address_values is always set to vec![] (the default value) before
+//     // being passed in.
+//     unit_test_config.named_address_values = resolution_graph
+//         .extract_named_address_mapping()
+//         .map(|(name, addr)| {
+//             (
+//                 name.to_string(),
+//                 NumericalAddress::new(addr.into_bytes(), NumberFormat::Hex),
+//             )
+//         })
+//         .collect();
+//
+//     let binary_config = BinaryConfig::new_unpublishable();
+//
+//     // Collect all the bytecode modules that are dependencies of the package. We need to do this
+//     // because they're not returned by the compilation result, but we need to add them in the
+//     // VM storage.
+//     let mut bytecode_deps_modules = vec![];
+//     for pkg in resolution_graph.package_table.values() {
+//         let source_available = !pkg
+//             .get_sources(&resolution_graph.build_options)
+//             .unwrap()
+//             .is_empty();
+//         if source_available {
+//             continue;
+//         }
+//         for bytes in pkg.get_bytecodes_bytes()? {
+//             let module = CompiledModule::deserialize_with_config(&bytes, &binary_config)?;
+//             bytecode_deps_modules.push(module);
+//         }
+//     }
+//
+//     let root_package = resolution_graph.root_package();
+//     let build_plan = BuildPlan::create(&resolution_graph)?;
+//
+//     // Compile the package. We need to intercede in the compilation, process being performed by the
+//     // Move package system, to first grab the compilation env, construct the test plan from it, and
+//     // then save it, before resuming the rest of the compilation and returning the results and
+//     // control back to the Move package system.
+//     let mut warning_diags = None;
+//     build_plan.compile_with_driver(writer, |compiler| {
+//         let (files, comments_and_compiler_res) = compiler.run::<PASS_CFGIR>().unwrap();
+//         let compiler =
+//             diagnostics::unwrap_or_report_pass_diagnostics(&files, comments_and_compiler_res);
+//         let (compiler, cfgir) = compiler.into_ast();
+//         let compilation_env = compiler.compilation_env();
+//         let built_test_plan = construct_test_plan(compilation_env, Some(root_package), &cfgir);
+//         let mapped_files = compilation_env.mapped_files().clone();
+//
+//         let compilation_result = compiler.at_cfgir(cfgir).build();
+//         let (units, warnings) =
+//             diagnostics::unwrap_or_report_pass_diagnostics(&files, compilation_result);
+//         diagnostics::report_warnings(&files, warnings.clone());
+//         let named_units: Vec<_> = units
+//             .clone()
+//             .into_iter()
+//             .map(|unit| unit.named_module)
+//             .collect();
+//         test_plan = Some((built_test_plan, mapped_files, named_units));
+//         warning_diags = Some(warnings);
+//         Ok((files, units))
+//     })?;
+//
+//     let (test_plan, mapped_files, units) = test_plan.unwrap();
+//     let test_plan = test_plan.unwrap();
+//     let no_tests = test_plan.is_empty();
+//     let test_plan = TestPlan::new(test_plan, mapped_files, units, bytecode_deps_modules);
+//
+//     let trace_path = pkg_path.join(".trace");
+//     let coverage_map_path = pkg_path
+//         .join(".coverage_map")
+//         .with_extension(MOVE_COVERAGE_MAP_EXTENSION);
+//     let cleanup_trace = || {
+//         if compute_coverage && trace_path.exists() {
+//             std::fs::remove_file(&trace_path).unwrap();
+//         }
+//     };
+//
+//     cleanup_trace();
+//
+//     // If we need to compute test coverage set the VM tracking environment variable since we will
+//     // need this trace to construct the coverage information.
+//     if compute_coverage {
+//         unsafe { std::env::set_var("MOVE_VM_TRACE", &trace_path) };
+//     }
+//
+//     // Run the tests. If any of the tests fail, then we don't produce a coverage report, so cleanup
+//     // the trace files.
+//     if !unit_test_config
+//         .run_and_report_unit_tests(test_plan, Some(natives), cost_table, writer)?
+//         .1
+//     {
+//         cleanup_trace();
+//         return Ok((UnitTestResult::Failure, warning_diags));
+//     }
+//
+//     // Compute the coverage map. This will be used by other commands after this.
+//     if compute_coverage && !no_tests {
+//         let coverage_map = CoverageMap::from_trace_file(trace_path);
+//         output_map_to_file(coverage_map_path, &coverage_map).unwrap();
+//     }
+//     Ok((UnitTestResult::Success, warning_diags))
+// }
 
 impl From<UnitTestResult> for ExitStatus {
     fn from(result: UnitTestResult) -> Self {

@@ -4,6 +4,8 @@
 
 use std::path::PathBuf;
 
+use move_package_alt::schema::EnvironmentName;
+
 use super::lint_flag::LintFlag;
 use clap::Parser;
 use serde::{Deserialize, Serialize};
@@ -54,4 +56,12 @@ pub struct BuildConfig {
     /// (regenerates it only if it doesn't exist)
     #[clap(skip)]
     pub force_lock_file: bool,
+
+    #[clap(
+        long = "env",
+        short = 'e',
+        global = true,
+        help = "Environment to use for building packages"
+    )]
+    pub env: Option<EnvironmentName>,
 }

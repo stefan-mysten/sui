@@ -1,10 +1,10 @@
 // Copyright (c) Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::manage_package::resolve_lock_file_path;
+// use crate::manage_package::resolve_lock_file_path;
 use clap::Parser;
 use move_cli::base;
-use move_package::BuildConfig as MoveBuildConfig;
+use move_package_compiling::build_config::BuildConfig as MoveBuildConfig;
 use std::{fs, path::Path};
 use sui_move_build::{implicit_deps, BuildConfig};
 use sui_package_management::system_package_versions::latest_system_packages;
@@ -15,11 +15,6 @@ const STRUCT_LAYOUTS_FILENAME: &str = "struct_layouts.yaml";
 #[derive(Parser)]
 #[group(id = "sui-move-build")]
 pub struct Build {
-    /// Include the contents of packages in dependencies that haven't been published (only relevant
-    /// when dumping bytecode as base64)
-    #[clap(long, global = true)]
-    pub with_unpublished_dependencies: bool,
-    /// Whether we are printing in base64.
     #[clap(long, global = true)]
     pub dump_bytecode_as_base64: bool,
     /// [Mainly for testing, not recommended for production]
@@ -48,14 +43,15 @@ impl Build {
         path: Option<&Path>,
         build_config: MoveBuildConfig,
     ) -> anyhow::Result<()> {
-        let rerooted_path = base::reroot_path(path)?;
-        let build_config = resolve_lock_file_path(build_config, Some(&rerooted_path))?;
-        Self::execute_internal(
-            &rerooted_path,
-            build_config,
-            self.generate_struct_layouts,
-            self.chain_id.clone(),
-        )
+        // let rerooted_path = base::reroot_path(path)?;
+        // let build_config = resolve_lock_file_path(build_config, Some(&rerooted_path))?;
+        // Self::execute_internal(
+        //     &rerooted_path,
+        //     build_config,
+        //     self.generate_struct_layouts,
+        //     self.chain_id.clone(),
+        // )
+        Ok(())
     }
 
     pub fn execute_internal(
@@ -64,7 +60,7 @@ impl Build {
         generate_struct_layouts: bool,
         chain_id: Option<String>,
     ) -> anyhow::Result<()> {
-        config.implicit_dependencies = implicit_deps(latest_system_packages());
+        // config.implicit_dependencies = implicit_deps(latest_system_packages());
         let pkg = BuildConfig {
             config,
             run_bytecode_verifier: true,

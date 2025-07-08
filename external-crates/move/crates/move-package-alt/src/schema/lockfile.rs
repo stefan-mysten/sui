@@ -35,7 +35,7 @@ pub type BuildConfig = toml::Value;
 #[derive(Debug, Serialize, Deserialize)]
 #[derive_where(Clone)]
 #[serde(rename_all = "kebab-case")]
-#[serde(deny_unknown_fields)]
+// #[serde(deny_unknown_fields)]
 pub struct Publication<F: MoveFlavor> {
     pub published_at: PublishedID,
     pub original_id: OriginalID,

@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use clap::*;
 use colored::Colorize;
-use move_package::BuildConfig as MoveBuildConfig;
+use move_package_compiling::build_config::BuildConfig as MoveBuildConfig;
 use sui_move::execute_move_command;
 use sui_types::exit_main;
 use tracing::debug;

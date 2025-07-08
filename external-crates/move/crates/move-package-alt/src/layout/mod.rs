@@ -2,5 +2,8 @@
 // Copyright (c) The Move Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-pub mod package_layout;
-pub mod source_layout;
+mod package_layout;
+mod source_layout;
+
+pub use package_layout::CompiledPackageLayout;
+pub use source_layout::SourcePackageLayout;

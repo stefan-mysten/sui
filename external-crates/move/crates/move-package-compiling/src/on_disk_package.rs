@@ -10,7 +10,7 @@ use move_command_line_common::files::{
     DEBUG_INFO_EXTENSION, MOVE_BYTECODE_EXTENSION, MOVE_COMPILED_EXTENSION, MOVE_EXTENSION,
 };
 use move_disassembler::disassembler::Disassembler;
-use move_package_alt::layout::package_layout::CompiledPackageLayout;
+use move_package_alt::layout::CompiledPackageLayout;
 use move_symbol_pool::Symbol;
 use std::{
     fs,

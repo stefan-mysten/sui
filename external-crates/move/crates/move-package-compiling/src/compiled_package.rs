@@ -9,8 +9,8 @@ use move_package_alt::{
 
 use crate::build_config::BuildConfig;
 use crate::on_disk_package::{OnDiskCompiledPackage, OnDiskPackage};
-use move_package_alt::layout::package_layout::CompiledPackageLayout;
-use move_package_alt::layout::source_layout::SourcePackageLayout;
+use move_package_alt::layout::CompiledPackageLayout;
+use move_package_alt::layout::SourcePackageLayout;
 
 use move_package_alt::schema::PublishedID;
 
@@ -212,10 +212,20 @@ fn build_docs(
 pub async fn compile<F: MoveFlavor>(
     // TODO: how does this work?
     // vfs_root: Option<&Path>,
-    root_pkg: &RootPackage<F>,
+    path: &Path,
     build_config: &BuildConfig,
-    env: &EnvironmentName,
 ) -> Result<CompiledPackage> {
+    let env = match build_config.env {
+        Some(ref env) => env,
+        None => {
+            debug!("No environment specified, defaulting to 'testnet'");
+            println!("No environment specified, defaulting to 'testnet'");
+            &"testnet".to_string()
+        }
+    };
+
+    let root_pkg = RootPackage::<F>::load(path, Some(env.to_string())).await?;
+
     // TODO: refactor this
     let pkgs = BTreeSet::from(["Sui", "SuiSystem", "MoveStdlib"]);
     let names = BTreeMap::from([
@@ -412,7 +422,7 @@ pub async fn compile<F: MoveFlavor>(
         let under_path = root_pkg.package_path().path().join("build");
         let root_package_name: Symbol = root_pkg.package_name().as_str().into();
 
-        save_to_disk(
+        let _ = save_to_disk(
             root_compiled_units.clone(),
             compiled_package_info.clone(),
             deps_compiled_units.clone(),
