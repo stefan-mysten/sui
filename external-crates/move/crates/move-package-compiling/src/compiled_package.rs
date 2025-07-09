@@ -258,7 +258,7 @@ pub async fn compile<F: MoveFlavor>(
     path: &Path,
     build_config: &BuildConfig,
 ) -> Result<CompiledPackage> {
-    let env = match build_config.env {
+    let env = match build_config.environment {
         Some(ref env) => env,
         None => {
             debug!("No environment specified, defaulting to 'testnet'");
@@ -465,14 +465,14 @@ pub async fn compile<F: MoveFlavor>(
         let under_path = root_pkg.package_path().path().join("build");
         let root_package_name: Symbol = root_pkg.package_name().as_str().into();
 
-        let _ = save_to_disk(
+        save_to_disk(
             root_compiled_units.clone(),
             compiled_package_info.clone(),
             deps_compiled_units.clone(),
             compiled_docs,
             root_package_name,
             under_path,
-        );
+        )?;
 
         let compiled_package = CompiledPackage {
             compiled_package_info,

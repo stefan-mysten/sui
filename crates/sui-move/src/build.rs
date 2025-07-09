@@ -45,19 +45,17 @@ impl Build {
         path: Option<&Path>,
         build_config: MoveBuildConfig,
     ) -> anyhow::Result<()> {
-        // let rerooted_path = base::reroot_path(path)?;
-        // let build_config = resolve_lock_file_path(build_config, Some(&rerooted_path))?;
-        // Self::execute_internal(
-        //     &rerooted_path,
-        //     build_config,
-        //     self.generate_struct_layouts,
-        //     self.chain_id.clone(),
-        // )
-        Ok(())
+        let path = path.unwrap_or(Path::new("."));
+        Self::execute_internal(
+            path,
+            build_config,
+            self.generate_struct_layouts,
+            self.chain_id.clone(),
+        )
     }
 
     pub fn execute_internal(
-        rerooted_path: &Path,
+        path: &Path,
         mut config: MoveBuildConfig,
         generate_struct_layouts: bool,
         chain_id: Option<String>,
@@ -69,7 +67,7 @@ impl Build {
             print_diags_to_stderr: true,
             chain_id,
         }
-        .build(rerooted_path)?;
+        .build(path)?;
 
         // if generate_struct_layouts {
         //     let layout_str = serde_yaml::to_string(&pkg.generate_struct_layouts()).unwrap();

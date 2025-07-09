@@ -58,10 +58,10 @@ pub struct BuildConfig {
     pub force_lock_file: bool,
 
     #[clap(
-        long = "env",
+        long = "environment",
         short = 'e',
         global = true,
         help = "Environment to use for building packages"
     )]
-    pub env: Option<EnvironmentName>,
+    pub environment: Option<EnvironmentName>,
 }

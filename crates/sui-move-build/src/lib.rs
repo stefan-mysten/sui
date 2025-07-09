@@ -44,7 +44,9 @@ use move_core_types::{
 // use move_package::{
 //     source_package::parsed_manifest::OnChainInfo, source_package::parsed_manifest::SourceManifest,
 // };
-use move_package_alt::{flavor::MoveFlavor, graph::PackageGraph, schema::PackageName};
+use move_package_alt::{
+    flavor::MoveFlavor, graph::PackageGraph, package::RootPackage, schema::PackageName,
+};
 use move_package_compiling::build_config::BuildConfig as MoveBuildConfig;
 use move_package_compiling::compiled_package::CompiledPackage as MoveCompiledPackage;
 use move_symbol_pool::Symbol;
@@ -97,10 +99,7 @@ pub struct CompiledPackage {
     /// Address the package is recorded as being published at.
     pub published_at: Result<ObjectID, PublishedAtError>,
     /// The dependency IDs of this package
-    pub dependency_ids: PackageDependencies,
-    /// The bytecode modules that this package depends on (both directly and transitively),
-    /// i.e. on-chain dependencies.
-    pub bytecode_deps: Vec<(PackageName, CompiledModule)>,
+    pub dependency_ids: Vec<ObjectID>, //PackageDependencies,
     /// Transitive dependency graph of a Move package
     pub dependency_graph: PackageGraph<SuiFlavor>,
 }
@@ -222,19 +221,47 @@ impl BuildConfig {
 
     /// Given a `path` and a `build_config`, build the package in that path, including its dependencies.
     /// If we are building the Sui framework, we skip the check that the addresses should be 0
-    pub fn build(self, path: &Path) -> SuiResult<CompiledPackage> {
-        todo!()
-        // let print_diags_to_stderr = self.print_diags_to_stderr;
-        // let run_bytecode_verifier = self.run_bytecode_verifier;
-        // let chain_id = self.chain_id.clone();
-        // let resolution_graph = self.resolution_graph(path, chain_id.clone())?;
-        // build_from_resolution_graph(
-        //     resolution_graph,
-        //     run_bytecode_verifier,
-        //     print_diags_to_stderr,
-        //     chain_id,
-        // )
+    pub fn build(self, path: &Path) -> anyhow::Result<CompiledPackage> {
+        let print_diags_to_stderr = self.print_diags_to_stderr;
+        let run_bytecode_verifier = self.run_bytecode_verifier;
+        let chain_id = self.chain_id.unwrap_or("testnet".to_string());
+
+        // we need to block here to compile the package, which requires to fetch dependencies
+        let root_pkg = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current()
+                .block_on(RootPackage::<SuiFlavor>::load(path, Some(chain_id.clone())))
+        })?;
+        let package = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(
+                move_package_compiling::compiled_package::compile::<SuiFlavor>(path, &self.config),
+            )
+        })?;
+
+        println!("Package compiled");
+        let dependency_ids = package
+            .dependency_ids()
+            .iter()
+            .map(|o| ObjectID::from_address(o.0))
+            .collect();
+
+        Ok(CompiledPackage {
+            package,
+            dependency_ids,
+            published_at: Ok(ObjectID::from_hex_literal("0x0").unwrap()), // TODO fix
+            dependency_graph: root_pkg
+                .dependencies()
+                .get(&chain_id)
+                .expect("to have a package graph for this env")
+                .clone(),
+        })
     }
+    // let resolution_graph = self.resolution_graph(path, chain_id.clone())?;
+    // build_from_resolution_graph(
+    //     resolution_graph,
+    //     run_bytecode_verifier,
+    //     print_diags_to_stderr,
+    //     chain_id,
+    // )
 
     // pub fn resolution_graph(
     //     mut self,
@@ -467,7 +494,7 @@ impl CompiledPackage {
     /// Return the set of Object IDs corresponding to this package's transitive dependencies'
     /// storage package IDs (where to load those packages on-chain).
     pub fn get_dependency_storage_package_ids(&self) -> Vec<ObjectID> {
-        self.dependency_ids.published.values().cloned().collect()
+        self.dependency_ids.clone()
     }
 
     /// Return a digest of the bytecode modules in this package.
@@ -475,7 +502,7 @@ impl CompiledPackage {
         let hash_modules = true;
         MovePackage::compute_digest_for_modules_and_deps(
             &self.get_package_bytes(),
-            self.dependency_ids.published.values(),
+            &self.dependency_ids,
             hash_modules,
         )
     }
@@ -661,7 +688,7 @@ impl CompiledPackage {
     //     }
     //
     pub fn get_published_dependencies_ids(&self) -> Vec<ObjectID> {
-        self.dependency_ids.published.values().cloned().collect()
+        self.dependency_ids.clone()
     }
     //
     //     /// Find the map of packages that are immediate dependencies of the root modules, joined with

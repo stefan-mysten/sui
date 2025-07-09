@@ -18,6 +18,7 @@ use tracing::debug;
 #[cfg(test)]
 use crate::dependency::PinnedDependencyInfo;
 
+#[derive(Debug)]
 /// A package that is defined as the root of a Move project.
 ///
 /// This is a special package that contains the project manifest and dependencies' graphs,

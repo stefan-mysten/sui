@@ -96,7 +96,9 @@ use tabled::{
     },
 };
 
+use move_package_alt::package::RootPackage;
 use move_symbol_pool::Symbol;
+use sui_package_alt::SuiFlavor;
 use sui_types::digests::ChainIdentifier;
 use tracing::{debug, info};
 
@@ -1087,37 +1089,9 @@ impl SuiClientCommands {
                         .map_err(|e| SuiError::ModulePublishFailure {
                             error: format!("Failed to canonicalize package path: {}", e),
                         })?;
-                // let build_config = resolve_lock_file_path(build_config, Some(&package_path))?;
-                // let previous_id = if let Some(ref chain_id) = chain_id {
-                //     sui_package_management::set_package_id(
-                //         &package_path,
-                //         build_config.install_dir.clone(),
-                //         chain_id,
-                //         AccountAddress::ZERO,
-                //     )?
-                // } else {
-                //     None
-                // };
-                let verify =
-                    check_dep_verification_flags(skip_dependency_verification, verify_deps)?;
 
-                let compile_result = compile_package(
-                    read_api,
-                    build_config.clone(),
-                    &package_path,
-                    with_unpublished_dependencies,
-                    !verify,
-                )
-                .await;
-                // // Restore original ID, then check result.
-                // if let (Some(chain_id), Some(previous_id)) = (chain_id, previous_id) {
-                //     let _ = sui_package_management::set_package_id(
-                //         &package_path,
-                //         build_config.install_dir.clone(),
-                //         &chain_id,
-                //         previous_id,
-                //     )?;
-                // }
+                let compile_result =
+                    compile_package(read_api, build_config.clone(), &package_path).await;
 
                 let compiled_package = compile_result?;
                 let compiled_modules = compiled_package.get_package_bytes();
@@ -2001,14 +1975,7 @@ pub(crate) async fn upgrade_package(
     skip_dependency_verification: bool,
     env_alias: Option<String>,
 ) -> Result<(u8, CompiledPackage), anyhow::Error> {
-    let mut compiled_package = compile_package(
-        read_api,
-        build_config,
-        package_path,
-        with_unpublished_dependencies,
-        skip_dependency_verification,
-    )
-    .await?;
+    let mut compiled_package = compile_package(read_api, build_config, package_path).await?;
 
     // pkg_tree_shake(
     //     read_api,
@@ -2070,6 +2037,52 @@ pub(crate) async fn upgrade_package(
 }
 
 pub(crate) async fn compile_package(
+    read_api: &ReadApi,
+    build_config: MoveBuildConfig,
+    package_path: &Path,
+) -> Result<CompiledPackage, anyhow::Error> {
+    let env = &build_config
+        .environment
+        .clone()
+        .unwrap_or("testnet".to_string());
+    println!("Publishing package to environment: {}", env);
+
+    // TODO we probably want this in a function and out of compile packagek
+    let root_pkg = RootPackage::<SuiFlavor>::load(package_path, Some(env.clone())).await?;
+    let chain_id = read_api.get_chain_identifier().await?;
+    let envs = root_pkg.environments();
+
+    let Some(manifest_chain_id) = envs.get(env) else {
+        bail!("Cannot find {env} environment in the package's manifest")
+    };
+
+    if &chain_id != manifest_chain_id {
+        bail!("The current active environment has a different chain identifier than the one in the manifest")
+    }
+    let package =
+        move_package_compiling::compiled_package::compile::<SuiFlavor>(package_path, &build_config)
+            .await
+            .unwrap();
+
+    let dependency_ids = package
+        .dependency_ids()
+        .iter()
+        .map(|o| ObjectID::from_address(o.0))
+        .collect();
+
+    Ok(CompiledPackage {
+        package,
+        dependency_ids,
+        published_at: Ok(ObjectID::from_hex_literal("0x0").unwrap()), // TODO fix
+        dependency_graph: root_pkg
+            .dependencies()
+            .get(env)
+            .expect("to have a package graph for this env")
+            .clone(),
+    })
+}
+
+pub(crate) async fn compile_package_old(
     read_api: &ReadApi,
     mut build_config: MoveBuildConfig,
     package_path: &Path,
