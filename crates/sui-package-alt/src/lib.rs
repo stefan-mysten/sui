@@ -10,3 +10,4 @@ pub use cli::Publish;
 mod sui_flavor;
 
 pub use sui_flavor::SuiFlavor;
+pub use sui_flavor::SuiMetadata;

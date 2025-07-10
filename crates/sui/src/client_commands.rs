@@ -45,7 +45,8 @@ use sui_source_validation::{BytecodeSourceVerifier, ValidationMode};
 use shared_crypto::intent::Intent;
 use sui_json::SuiJsonValue;
 use sui_json_rpc_types::{
-    Coin, DevInspectArgs, DevInspectResults, DryRunTransactionBlockResponse, DynamicFieldInfo,
+    get_new_package_obj_from_response, get_new_package_upgrade_cap_from_response, Coin,
+    DevInspectArgs, DevInspectResults, DryRunTransactionBlockResponse, DynamicFieldInfo,
     DynamicFieldPage, SuiCoinMetadata, SuiData, SuiExecutionStatus, SuiObjectData,
     SuiObjectDataOptions, SuiObjectResponse, SuiObjectResponseQuery, SuiParsedData,
     SuiProtocolConfigValue, SuiRawData, SuiTransactionBlockEffects, SuiTransactionBlockEffectsAPI,
@@ -96,7 +97,10 @@ use tabled::{
     },
 };
 
-use move_package_alt::package::RootPackage;
+use move_package_alt::{
+    package::RootPackage,
+    schema::{OriginalID, ParsedLockfile, Publication, PublishedID},
+};
 use move_symbol_pool::Symbol;
 use sui_package_alt::SuiFlavor;
 use sui_types::digests::ChainIdentifier;
@@ -929,14 +933,11 @@ impl SuiClientCommands {
                 let sender = context.infer_sender(&payment.gas).await?;
                 let client = context.get_client().await?;
                 let read_api = client.read_api();
-                let chain_id = read_api.get_chain_identifier().await.ok();
+                let chain_id = read_api.get_chain_identifier().await?;
                 let protocol_version = read_api.get_protocol_config(None).await?.protocol_version;
                 let protocol_config = ProtocolConfig::get_for_version(
                     protocol_version,
-                    match chain_id
-                        .as_ref()
-                        .and_then(ChainIdentifier::from_chain_short_id)
-                    {
+                    match ChainIdentifier::from_chain_short_id(&chain_id) {
                         Some(chain_id) => chain_id.chain(),
                         None => Chain::Unknown,
                     },
@@ -949,21 +950,12 @@ impl SuiClientCommands {
                         .map_err(|e| SuiError::ModulePublishFailure {
                             error: format!("Failed to canonicalize package path: {}", e),
                         })?;
-                // let build_config = resolve_lock_file_path(build_config, Some(&package_path))?;
-                // let previous_id = if let Some(ref chain_id) = chain_id {
-                //     sui_package_management::set_package_id(
-                //         &package_path,
-                //         build_config.install_dir.clone(),
-                //         chain_id,
-                //         AccountAddress::ZERO,
-                //     )?
-                // } else {
-                //     None
-                // };
                 let env_alias = context.get_active_env().map(|e| e.alias.clone()).ok();
                 let verify =
                     check_dep_verification_flags(skip_dependency_verification, verify_deps)?;
 
+                // TODO we should read upgrade cap from lockfile, but the question is how do we
+                // migrate? During migration we might want to try to find the upgrade cap?
                 let upgrade_result = upgrade_package(
                     read_api,
                     build_config.clone(),
@@ -974,22 +966,13 @@ impl SuiClientCommands {
                     env_alias,
                 )
                 .await;
-
-                // Restore original ID, then check result.
-                // if let (Some(chain_id), Some(previous_id)) = (chain_id, previous_id) {
-                //     let _ = sui_package_management::set_package_id(
-                //         &package_path,
-                //         build_config.install_dir.clone(),
-                //         &chain_id,
-                //         previous_id,
-                //     )?;
-                // }
-
                 let (upgrade_policy, compiled_package) =
                     upgrade_result.map_err(|e| anyhow!("{e}"))?;
 
                 let compiled_modules = compiled_package.get_package_bytes();
-                let package_id = compiled_package.published_at.clone()?;
+                let package_id = compiled_package.published_at.ok_or_else(|| {
+                    anyhow::anyhow!("Cannot upgrade package without having a published id ")
+                })?;
                 let package_digest = compiled_package.get_package_digest();
                 let dep_ids = compiled_package.get_published_dependencies_ids();
 
@@ -998,7 +981,7 @@ impl SuiClientCommands {
                         read_api,
                         package_id,
                         compiled_package,
-                        package_path,
+                        package_path.clone(),
                         upgrade_policy,
                         protocol_config,
                     )
@@ -1031,25 +1014,32 @@ impl SuiClientCommands {
                     processing,
                 )
                 .await?;
+                let env = build_config.environment.clone();
+                let env = env.unwrap_or("testnet".to_string());
+                let root_pkg =
+                    RootPackage::<SuiFlavor>::load(&package_path, Some(env.clone())).await?;
+                root_pkg
+                    .update_deps_and_write_to_lockfile(&BTreeMap::from([(
+                        env.clone(),
+                        chain_id.to_owned(),
+                    )]))
+                    .await?;
 
-                if let SuiClientCommandResult::TransactionBlock(ref response) = result {
-                    if let Err(e) = sui_package_management::update_lock_file(
-                        context,
-                        LockCommand::Upgrade,
-                        build_config.install_dir,
-                        build_config.lock_file,
-                        response,
-                    )
-                    .await
-                    {
-                        eprintln!(
-                            "{} {e}",
-                            "Warning: Issue while updating `Move.lock` for published package."
-                                .bold()
-                                .yellow()
-                        )
-                    };
-                };
+                let mut lockfile = root_pkg.load_lockfile()?;
+                let lockfile_path = root_pkg.package_path().lockfile_path();
+                // update the lockfile with the published package information for this environment
+                update_lock_file_for_chain_env(
+                    &mut lockfile,
+                    lockfile_path,
+                    &chain_id.to_string(),
+                    &env,
+                    LockCommand::Upgrade,
+                    &result.tx_block_response().unwrap(),
+                    "TODO", //TODO!
+                    &build_config,
+                )
+                .await?;
+
                 result
             }
             SuiClientCommands::Publish {
@@ -1062,25 +1052,10 @@ impl SuiClientCommands {
                 gas_data,
                 processing,
             } => {
-                // if build_config.test_mode {
-                //     return Err(SuiError::ModulePublishFailure {
-                //         error:
-                //             "The `publish` subcommand should not be used with the `--test` flag\n\
-                //             \n\
-                //             Code in published packages must not depend on test code.\n\
-                //             In order to fix this and publish the package without `--test`, \
-                //             remove any non-test dependencies on test-only code.\n\
-                //             You can ensure all test-only dependencies have been removed by \
-                //             compiling the package normally with `sui move build`."
-                //                 .to_string(),
-                //     }
-                //     .into());
-                // }
-
                 let sender = context.infer_sender(&payment.gas).await?;
                 let client = context.get_client().await?;
                 let read_api = client.read_api();
-                let chain_id = read_api.get_chain_identifier().await.ok();
+                let chain_id = read_api.get_chain_identifier().await?;
 
                 check_protocol_version_and_warn(read_api).await?;
                 let package_path =
@@ -1090,10 +1065,19 @@ impl SuiClientCommands {
                             error: format!("Failed to canonicalize package path: {}", e),
                         })?;
 
-                let compile_result =
-                    compile_package(read_api, build_config.clone(), &package_path).await;
+                let compiled_package =
+                    compile_package(read_api, build_config.clone(), &package_path).await?;
+                let env = build_config.environment.clone();
+                let env = env.unwrap_or("testnet".to_string());
+                let root_pkg =
+                    RootPackage::<SuiFlavor>::load(&package_path, Some(env.clone())).await?;
+                root_pkg
+                    .update_deps_and_write_to_lockfile(&BTreeMap::from([(
+                        env.clone(),
+                        chain_id.to_owned(),
+                    )]))
+                    .await?;
 
-                let compiled_package = compile_result?;
                 let compiled_modules = compiled_package.get_package_bytes();
                 let dep_ids = compiled_package.get_published_dependencies_ids();
 
@@ -1117,24 +1101,21 @@ impl SuiClientCommands {
                 )
                 .await?;
 
-                if let SuiClientCommandResult::TransactionBlock(ref response) = result {
-                    if let Err(e) = sui_package_management::update_lock_file(
-                        context,
-                        LockCommand::Publish,
-                        build_config.install_dir,
-                        build_config.lock_file,
-                        response,
-                    )
-                    .await
-                    {
-                        eprintln!(
-                            "{} {e}",
-                            "Warning: Issue while updating `Move.lock` for published package."
-                                .bold()
-                                .yellow()
-                        )
-                    };
-                };
+                let mut lockfile = root_pkg.load_lockfile()?;
+                let lockfile_path = root_pkg.package_path().lockfile_path();
+                // update the lockfile with the published package information for this environment
+                update_lock_file_for_chain_env(
+                    &mut lockfile,
+                    lockfile_path,
+                    &chain_id.to_string(),
+                    &env,
+                    LockCommand::Publish,
+                    &result.tx_block_response().unwrap(),
+                    "TODO", //TODO!
+                    &build_config,
+                )
+                .await?;
+
                 result
             }
 
@@ -1975,7 +1956,7 @@ pub(crate) async fn upgrade_package(
     skip_dependency_verification: bool,
     env_alias: Option<String>,
 ) -> Result<(u8, CompiledPackage), anyhow::Error> {
-    let mut compiled_package = compile_package(read_api, build_config, package_path).await?;
+    let compiled_package = compile_package(read_api, build_config, package_path).await?;
 
     // pkg_tree_shake(
     //     read_api,
@@ -1984,30 +1965,30 @@ pub(crate) async fn upgrade_package(
     // )
     // .await?;
 
-    compiled_package.published_at.as_ref().map_err(|e| match e {
-        PublishedAtError::NotPresent => {
-            anyhow!("No 'published-at' field in Move.toml or 'published-id' in Move.lock for package to be upgraded.")
-        }
-        PublishedAtError::Invalid(v) => anyhow!(
-            "Invalid 'published-at' field in Move.toml or 'published-id' in Move.lock of package to be upgraded. \
-                         Expected an on-chain address, but found: {v:?}"
-        ),
-        PublishedAtError::Conflict {
-            id_lock,
-            id_manifest,
-        } => {
-            let env_alias = format!("(currently {})", env_alias.unwrap_or_default());
-            anyhow!(
-                "Conflicting published package address: `Move.toml` contains published-at address \
-                 {id_manifest} but `Move.lock` file contains published-at address {id_lock}. \
-                 You may want to:
- - delete the published-at address in the `Move.toml` if the `Move.lock` address is correct; OR
- - update the `Move.lock` address using the `sui manage-package` command to be the same as the `Move.toml`; OR
- - check that your `sui active-env` {env_alias} corresponds to the chain on which the package is published (i.e., devnet, testnet, mainnet); OR
- - contact the maintainer if this package is a dependency and request resolving the conflict."
-            )
-        }
-    })?;
+    //    compiled_package.published_at.as_ref().map_err(|e| match e {
+    //        PublishedAtError::NotPresent => {
+    //            anyhow!("No 'published-at' field in Move.toml or 'published-id' in Move.lock for package to be upgraded.")
+    //        }
+    //        PublishedAtError::Invalid(v) => anyhow!(
+    //            "Invalid 'published-at' field in Move.toml or 'published-id' in Move.lock of package to be upgraded. \
+    //                         Expected an on-chain address, but found: {v:?}"
+    //        ),
+    //        PublishedAtError::Conflict {
+    //            id_lock,
+    //            id_manifest,
+    //        } => {
+    //            let env_alias = format!("(currently {})", env_alias.unwrap_or_default());
+    //            anyhow!(
+    //                "Conflicting published package address: `Move.toml` contains published-at address \
+    //                 {id_manifest} but `Move.lock` file contains published-at address {id_lock}. \
+    //                 You may want to:
+    // - delete the published-at address in the `Move.toml` if the `Move.lock` address is correct; OR
+    // - update the `Move.lock` address using the `sui manage-package` command to be the same as the `Move.toml`; OR
+    // - check that your `sui active-env` {env_alias} corresponds to the chain on which the package is published (i.e., devnet, testnet, mainnet); OR
+    // - contact the maintainer if this package is a dependency and request resolving the conflict."
+    //            )
+    //        }
+    //    })?;
 
     let resp = read_api
         .get_object_with_options(
@@ -2070,10 +2051,15 @@ pub(crate) async fn compile_package(
         .map(|o| ObjectID::from_address(o.0))
         .collect();
 
+    let lockfile = root_pkg.load_lockfile()?;
+
     Ok(CompiledPackage {
         package,
         dependency_ids,
-        published_at: Ok(ObjectID::from_hex_literal("0x0").unwrap()), // TODO fix
+        published_at: lockfile
+            .published
+            .get(env)
+            .map(|x| ObjectID::from_address(x.published_at.0)),
         dependency_graph: root_pkg
             .dependencies()
             .get(env)
@@ -3536,4 +3522,62 @@ async fn get_replay_node(context: &mut WalletContext) -> Result<SR2::Node, anyho
         Chain::Testnet => SR2::Node::Testnet,
         Chain::Unknown => bail!("Unsupported chain identifier for replay -- only testnet and mainnet are supported currently"),
     })
+}
+
+pub async fn update_lock_file_for_chain_env(
+    lockfile: &mut ParsedLockfile<SuiFlavor>,
+    lockfile_path: PathBuf,
+    chain_id: &str,
+    env: &str,
+    command: LockCommand,
+    response: &SuiTransactionBlockResponse,
+    binary_version: &str,
+    build_config: &MoveBuildConfig,
+) -> Result<(), anyhow::Error> {
+    // Get the published package ID and version from the response
+    let (published_id, version, _) =
+        get_new_package_obj_from_response(response).ok_or_else(|| {
+            anyhow!(
+                "Expected a valid published package response but didn't see \
+         one when attempting to update the `Move.lock`."
+            )
+        })?;
+
+    match command {
+        LockCommand::Publish => {
+            let (upgrade_cap, _, _) = get_new_package_upgrade_cap_from_response(response)
+                .ok_or_else(|| anyhow!("Expected a valid published package with a upgrade cap"))?;
+            let publication_data = Publication::<SuiFlavor> {
+                published_at: PublishedID(*published_id),
+                original_id: OriginalID(*published_id),
+                chain_id: chain_id.to_string(),
+                toolchain_version: binary_version.to_string(),
+                build_config: BTreeMap::new(),
+                metadata: sui_package_alt::SuiMetadata {
+                    upgrade_cap: Some((*upgrade_cap).into()),
+                    version: Some(version.value()),
+                },
+            };
+
+            lockfile.published.insert(env.to_string(), publication_data);
+        }
+        LockCommand::Upgrade => {
+            if let Some(pub_data) = lockfile.published.get_mut(env) {
+                pub_data.published_at = PublishedID(*published_id);
+                pub_data.metadata.version = Some(version.value());
+            };
+        }
+    }
+
+    let lockfile_str = lockfile.render_as_toml();
+
+    std::fs::write(&lockfile_path, lockfile_str).map_err(|e| {
+        anyhow!(
+            "Failed to write lockfile at {}: {}",
+            lockfile_path.display(),
+            e
+        )
+    })?;
+
+    Ok(())
 }

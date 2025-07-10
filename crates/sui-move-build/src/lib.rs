@@ -97,9 +97,9 @@ pub mod test_utils {
 pub struct CompiledPackage {
     pub package: MoveCompiledPackage,
     /// Address the package is recorded as being published at.
-    pub published_at: Result<ObjectID, PublishedAtError>,
+    pub published_at: Option<ObjectID>,
     /// The dependency IDs of this package
-    pub dependency_ids: Vec<ObjectID>, //PackageDependencies,
+    pub dependency_ids: Vec<ObjectID>,
     /// Transitive dependency graph of a Move package
     pub dependency_graph: PackageGraph<SuiFlavor>,
 }
@@ -247,7 +247,7 @@ impl BuildConfig {
         Ok(CompiledPackage {
             package,
             dependency_ids,
-            published_at: Ok(ObjectID::from_hex_literal("0x0").unwrap()), // TODO fix
+            published_at: None, // TODO fix this once backward compatibility lands
             dependency_graph: root_pkg
                 .dependencies()
                 .get(&chain_id)

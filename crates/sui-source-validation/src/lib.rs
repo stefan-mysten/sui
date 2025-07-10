@@ -109,7 +109,20 @@ impl ValidationMode {
     fn root_address(&self, package: &CompiledPackage) -> Result<Option<AccountAddress>, Error> {
         match self {
             Self::Root { at: Some(addr), .. } => Ok(Some(*addr)),
-            Self::Root { at: None, .. } => Ok(Some(*package.published_at.clone()?)),
+            Self::Root { at: None, .. } => {
+                let addr = package.published_at;
+
+                let address = if let Some(a) = addr {
+                    Some(AccountAddress::from_hex(a.to_hex()).map_err(|e| {
+                        Error::PublishedAt(sui_package_management::PublishedAtError::Invalid(
+                            format!("{e}"),
+                        ))
+                    })?)
+                } else {
+                    None
+                };
+                Ok(address)
+            }
             Self::Deps => Ok(None),
         }
     }
