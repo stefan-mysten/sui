@@ -2030,7 +2030,9 @@ pub(crate) async fn compile_package(
 
     // TODO we probably want this in a function and out of compile packagek
     let root_pkg = RootPackage::<SuiFlavor>::load(package_path, Some(env.clone())).await?;
+    debug!("Loaded package from {:?}", package_path.display());
     let chain_id = read_api.get_chain_identifier().await?;
+    debug!("Current client has {chain_id} as chain identifier");
     let envs = root_pkg.environments();
 
     let Some(manifest_chain_id) = envs.get(env) else {
@@ -2047,6 +2049,7 @@ pub(crate) async fn compile_package(
         .expect("to have a package graph for this env")
         .clone();
     let lockfile = root_pkg.load_lockfile()?;
+
     let mut stdout = std::io::stdout();
     let mut writer: &mut dyn std::io::Write = &mut stdout;
     let package = move_package_compiling::compile_from_root_package::<
