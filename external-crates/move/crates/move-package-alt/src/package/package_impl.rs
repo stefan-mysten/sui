@@ -18,6 +18,7 @@ use crate::{
     schema::{LocalDepInfo, LockfileDependencyInfo, OriginalID, Publication, PublishedID},
 };
 use move_core_types::{account_address::AccountAddress, identifier::Identifier};
+use tracing::debug;
 
 pub type EnvironmentName = String;
 pub type EnvironmentID = String;
@@ -113,7 +114,7 @@ impl<F: MoveFlavor> Package<F> {
             .map(|l| l.published().clone())
             .map(|x| {
                 x.into_iter()
-                    .map(|(env, pub_info)| (pub_info.chain_id.clone(), pub_info))
+                    .map(|(env, pub_info)| (env, pub_info))
                     .collect()
             })
             .unwrap_or_default();

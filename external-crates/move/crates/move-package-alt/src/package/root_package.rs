@@ -98,13 +98,12 @@ impl<F: MoveFlavor + fmt::Debug> RootPackage<F> {
     /// Read the lockfile from the root directory, returning an empty structure if none exists
     pub fn load_lockfile(&self) -> PackageResult<ParsedLockfile<F>> {
         let path = self.package_path().lockfile_path();
-        debug!("loading lockfile {:?}", path);
 
         if !path.exists() {
             return Ok(ParsedLockfile::<F>::default());
         }
 
-        let file = FileHandle::new(self.package_path().lockfile_path())?;
+        let file = FileHandle::new(path)?;
         Ok(toml_edit::de::from_str(file.source())?)
     }
 

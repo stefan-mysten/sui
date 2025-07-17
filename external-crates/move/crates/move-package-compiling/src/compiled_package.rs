@@ -827,12 +827,59 @@ pub(crate) fn build_for_driver<W: Write, T, F: MoveFlavor>(
 ) -> Result<T> {
     let deps: Vec<Package<F>> = vec![];
 
+    // TODO: this should go away up to see below
+    let names = BTreeMap::from([
+        ("Sui", "sui"),
+        ("SuiSystem", "sui_system"),
+        ("MoveStdlib", "std"),
+    ]);
+
+    let mut named_address_map: BTreeMap<Symbol, NumericalAddress> = BTreeMap::new();
+
+    if let Some(dependency_graph) = &root_pkg.dependencies().get(&env) {
+        for node in dependency_graph.nodes() {
+            if node.name() == root_pkg.package_name() {
+                continue;
+            }
+            println!("Node {:?}", node);
+            let addr = &node.published_at(&env)?;
+            // published_ids.push(addr.clone());
+            let addr = NumericalAddress::new(
+                addr.0.into_bytes(),
+                move_compiler::shared::NumberFormat::Hex,
+            );
+            let pkg_name: Symbol = if names.contains_key(&node.name().as_str()) {
+                // return one of the standard aliases
+                (*names.get(node.name().as_str()).unwrap()).into()
+            } else {
+                node.name().as_str().into()
+            };
+
+            named_address_map.insert(pkg_name, addr);
+        }
+    }
+
+    named_address_map.insert(
+        root_pkg.package_name().as_str().into(),
+        NumericalAddress::new(
+            AccountAddress::from_hex_literal("0x0")
+                .unwrap()
+                .into_bytes(),
+            move_compiler::shared::NumberFormat::Hex,
+        ),
+    );
+
+    // up to here
+
     if let Some(dependency_graph) = &root_pkg.dependencies().get(&env) {
         let mut dependencies_paths = vec![];
         let nodes = dependency_graph.nodes();
 
         // Find the source paths for each dependency and build the PackagePaths
         for node in nodes {
+            if node.name() == root_pkg.package_name() {
+                continue;
+            }
             writeln!(
                 w,
                 "{} {}",
@@ -863,7 +910,8 @@ pub(crate) fn build_for_driver<W: Write, T, F: MoveFlavor>(
                 )),
                 // TODO: fixed named_address map for each package. It should contain the package
                 // and its direct deps
-                named_address_map: BTreeMap::new(), // named_address_map.clone(),
+                // named_address_map: BTreeMap::new(),
+                named_address_map: named_address_map.clone(),
                 paths: sources,
             };
 
