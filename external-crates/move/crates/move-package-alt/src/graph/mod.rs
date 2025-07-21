@@ -16,7 +16,7 @@ use crate::{
     dependency::PinnedDependencyInfo,
     errors::PackageResult,
     flavor::MoveFlavor,
-    package::{paths::PackagePath, EnvironmentName, Package},
+    package::{EnvironmentName, Package, paths::PackagePath},
     schema::{Environment, PackageName},
 };
 use builder::PackageGraphBuilder;
@@ -91,6 +91,15 @@ impl<F: MoveFlavor> PackageGraph<F> {
             .edge_endpoints(edge)
             .expect("edge is a valid index into the graph");
 
+        println!(
+            "Package name: {:?}",
+            self.inner[source_index].package.name()
+        );
+        println!("Edge : {:?}", self.inner[edge]);
+        println!(
+            "Direct deps {:?}",
+            self.inner[source_index].package.direct_deps()
+        );
         self.inner[source_index]
             .package
             .direct_deps()

@@ -208,7 +208,7 @@ impl<F: MoveFlavor> PackageGraphBuilder<F> {
             // TODO(manos)(3): Do we wanna rename only for legacy parents, and error out for modern parents?
             // If we're dealing with legacy packages, we are free to fix the naming in the outgoing edge, to match
             // our modern system names.
-            let edge_name = if fetched.is_legacy() {
+            let edge_name = if package.is_legacy() {
                 fetched.name()
             } else {
                 name

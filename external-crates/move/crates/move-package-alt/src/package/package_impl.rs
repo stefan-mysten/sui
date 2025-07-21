@@ -248,8 +248,8 @@ fn implicit_deps<F: MoveFlavor>(
         ImplicitDepMode::Enabled => F::implicit_deps(env.id().to_string()),
         ImplicitDepMode::Disabled => BTreeMap::new(),
         ImplicitDepMode::Legacy => {
+            let legacy_manifest = legacy_manifest.expect("Legacy manifest should be present");
             let system_deps_in_legacy_manifest = legacy_manifest
-                .expect("Legacy manifest should be present")
                 .deps
                 .iter()
                 .any(|(name, _)| SYSTEM_DEPS_NAMES.contains(&name.as_str()));
@@ -257,7 +257,15 @@ fn implicit_deps<F: MoveFlavor>(
             if system_deps_in_legacy_manifest {
                 BTreeMap::new()
             } else {
-                F::implicit_deps(env.id().to_string())
+                let deps = F::implicit_deps(env.id().to_string());
+
+                // for legacy system packages, we don't need to add implicit deps for them as their
+                // dependencies are explicitly set in their manifest
+                if deps.contains_key(legacy_manifest.metadata.name.get_ref()) {
+                    BTreeMap::new()
+                } else {
+                    deps
+                }
             }
         }
         ImplicitDepMode::Testing => todo!(),

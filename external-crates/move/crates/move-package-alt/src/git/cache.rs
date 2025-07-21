@@ -163,11 +163,12 @@ impl GitTree {
                     "advice.detachedHead=false",
                     "clone",
                     "--quiet",
-                    "--sparse",
-                    "--filter=blob:none",
+                    // "--sparse",
+                    // "--filter=blob:none",
                     "--no-checkout",
-                    "--depth",
-                    "1",
+                    // TODO: we should have this!
+                    // "--depth",
+                    // "1",
                     &self.repo,
                     &self.path_to_repo.to_string_lossy(),
                 ],
@@ -184,17 +185,17 @@ impl GitTree {
             // git sparse-checkout add <path>
             let path_in_repo = self.path_in_repo().to_string_lossy();
 
-            self.run_git(&["sparse-checkout", "add", &path_in_repo])
-                .await?;
+            // self.run_git(&["sparse-checkout", "add", &path_in_repo])
+            //     .await?;
 
             // git checkout
             self.run_git(&["checkout", "--quiet", self.sha.as_ref()])
                 .await?;
-            let cmd = Command::new("ls")
-                .arg(&self.path_to_repo)
-                .output()
-                .await
-                .unwrap();
+            // let cmd = Command::new("ls")
+            //     .arg(&self.path_to_repo)
+            //     .output()
+            //     .await
+            //     .unwrap();
         }
 
         // check for dirt

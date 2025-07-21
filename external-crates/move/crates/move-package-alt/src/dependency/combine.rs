@@ -35,6 +35,8 @@ impl CombinedDependency {
         dependencies: &BTreeMap<PackageName, DefaultDependency>,
         implicit_deps: &BTreeMap<PackageName, ReplacementDependency>,
     ) -> ManifestResult<BTreeMap<PackageName, Self>> {
+        println!("Dependencies: {:?}", dependencies);
+        println!("Implicit Dependencies: {:?}", implicit_deps);
         let mut result = BTreeMap::new();
 
         let mut replacements = dep_replacements.clone();
@@ -61,6 +63,7 @@ impl CombinedDependency {
         }
 
         for (pkg_name, dep) in implicit_deps {
+            println!("Dep replacement {:?}", dep);
             result.insert(
                 pkg_name.clone(),
                 Self::from_replacement(*file, env.name().to_string(), dep.clone())?,
