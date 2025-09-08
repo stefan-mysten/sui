@@ -11,6 +11,7 @@ use anyhow::{anyhow, bail, ensure, Context};
 use clap::*;
 use colored::Colorize;
 use fastcrypto::traits::KeyPair;
+use move_analyzer::analyzer;
 use move_command_line_common::files::MOVE_COMPILED_EXTENSION;
 use move_package_alt_compilation::build_config::BuildConfig;
 use mysten_common::tempdir;
@@ -55,6 +56,7 @@ use sui_keys::key_derive::generate_new_key;
 use sui_keys::keypair_file::read_key;
 use sui_keys::keystore::{AccountKeystore, FileBasedKeystore, Keystore};
 use sui_move::{self, execute_move_command};
+use sui_package_alt::SuiFlavor;
 use sui_sdk::sui_client_config::{SuiClientConfig, SuiEnv};
 use sui_sdk::wallet_context::WalletContext;
 use sui_swarm::memory::Swarm;
@@ -754,7 +756,7 @@ impl SuiCommand {
             }
             SuiCommand::FireDrill { fire_drill } => run_fire_drill(fire_drill).await,
             SuiCommand::Analyzer => {
-                // analyzer::run(implicit_deps(latest_system_packages()));
+                analyzer::run::<SuiFlavor>();
                 Ok(())
             }
             SuiCommand::AnalyzeTrace {
