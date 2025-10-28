@@ -867,6 +867,10 @@ struct FeatureFlags {
     #[serde(skip_serializing_if = "is_false")]
     enable_display_registry: bool,
 
+    // If true, enable private generics verifier v2
+    #[serde(skip_serializing_if = "is_false")]
+    private_generics_verifier_v2: bool,
+
     // If true, deprecate global storage ops during Move module deserialization
     #[serde(skip_serializing_if = "is_false")]
     deprecate_global_storage_ops_during_deserialization: bool,
@@ -2273,7 +2277,21 @@ impl ProtocolConfig {
     }
 
     pub fn enable_ptb_execution_v2(&self) -> bool {
-        self.feature_flags.enable_ptb_execution_v2
+        let enabled = self.feature_flags.enable_ptb_execution_v2;
+        // PTB execution v2 requires gas model version > 10 and the translation charges to be set.
+        if enabled {
+            debug_assert!(self.translation_per_command_base_charge.is_some());
+            debug_assert!(self.translation_per_input_base_charge.is_some());
+            debug_assert!(self.translation_pure_input_per_byte_charge.is_some());
+            debug_assert!(self.translation_per_type_node_charge.is_some());
+            debug_assert!(self.translation_per_reference_node_charge.is_some());
+            debug_assert!(self.translation_metering_step_resolution.is_some());
+            debug_assert!(self.translation_per_linkage_entry_charge.is_some());
+            debug_assert!(self.feature_flags.abstract_size_in_object_runtime);
+            debug_assert!(self.feature_flags.object_runtime_charge_cache_load_gas);
+            debug_assert!(self.gas_model_version.is_some_and(|version| version > 10));
+        }
+        enabled
     }
 
     pub fn better_adapter_type_resolution_errors(&self) -> bool {
@@ -2362,6 +2380,10 @@ impl ProtocolConfig {
 
     pub fn allow_references_in_ptbs(&self) -> bool {
         self.feature_flags.allow_references_in_ptbs
+    }
+
+    pub fn private_generics_verifier_v2(&self) -> bool {
+        self.feature_flags.private_generics_verifier_v2
     }
 
     pub fn deprecate_global_storage_ops_during_deserialization(&self) -> bool {
@@ -4186,7 +4208,9 @@ impl ProtocolConfig {
                 99 => {
                     cfg.feature_flags.use_new_commit_handler = true;
                 }
-                100 => {}
+                100 => {
+                    cfg.feature_flags.private_generics_verifier_v2 = true;
+                }
                 101 => {
                     cfg.feature_flags.create_root_accumulator_object = true;
                     cfg.max_updates_per_settlement_txn = Some(100);
@@ -4270,6 +4294,7 @@ impl ProtocolConfig {
             max_variants_in_enum: self.max_move_enum_variants_as_option(),
             additional_borrow_checks,
             better_loader_errors: self.better_loader_errors(),
+            private_generics_verifier_v2: self.private_generics_verifier_v2(),
         }
     }
 
@@ -4456,6 +4481,9 @@ impl ProtocolConfig {
         self.feature_flags.consensus_batched_block_sync = val;
     }
 
+    /// NB: We are setting a number of feature flags and protocol config fields here to to
+    /// facilitate testing of PTB execution v2. These feature flags and config fields should be set
+    /// with or before enabling PTB execution v2 in a real protocol upgrade.
     pub fn set_enable_ptb_execution_v2_for_testing(&mut self, val: bool) {
         self.feature_flags.enable_ptb_execution_v2 = val;
         // Remove this and set these fields when we move this to be set for a specific protocol
@@ -4468,6 +4496,11 @@ impl ProtocolConfig {
             self.translation_per_reference_node_charge = Some(1);
             self.translation_metering_step_resolution = Some(1000);
             self.translation_per_linkage_entry_charge = Some(10);
+            if self.gas_model_version.is_some_and(|version| version <= 10) {
+                self.gas_model_version = Some(11);
+            }
+            self.feature_flags.abstract_size_in_object_runtime = true;
+            self.feature_flags.object_runtime_charge_cache_load_gas = true;
         }
     }
 
