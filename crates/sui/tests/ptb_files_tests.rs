@@ -96,6 +96,13 @@ async fn test_ptb_files(path: &Path) -> datatest_stable::Result<()> {
     use normalize_line_endings::normalized;
 
     // === FINALLY DO THE ASSERTION ===
+    #[cfg(unix)]
+    insta::assert_snapshot!(
+        fname(),
+        &String::from_iter(normalized(results.join("\n").chars()))
+    );
+
+    #[cfg(windows)]
     insta::assert_snapshot!(
         fname(),
         &String::from_iter(normalized(results.join("\n").chars()))
