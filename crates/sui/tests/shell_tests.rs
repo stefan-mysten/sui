@@ -49,16 +49,43 @@ async fn test_shell_snapshot(path: &Path) -> datatest_stable::Result<()> {
         &CopyOptions::new().content_only(true),
     )?;
 
+    // On Windows, canonicalize the sandbox path after copying files to ensure
+    // it's in the proper format for both bash and Windows executables
+    let sandbox_canonical = if cfg!(windows) {
+        sandbox.canonicalize()?
+    } else {
+        sandbox.to_path_buf()
+    };
+
     // set up command
     let mut shell = Command::new("bash");
-    shell
-        .env(
-            "PATH",
-            format!("{}:{}", get_sui_bin_path(), std::env::var("PATH")?),
-        )
-        .env("RUST_BACKTRACE", "0")
-        .current_dir(sandbox)
-        .arg(path.file_name().unwrap());
+
+    // On Windows, use the -c option with an explicit cd to avoid issues with
+    // canonicalized paths that contain shortened directory names (RUNNER~1)
+    if cfg!(windows) {
+        let script_name = path.file_name().unwrap().to_string_lossy();
+        shell
+            .env(
+                "PATH",
+                format!("{}:{}", get_sui_bin_path(), std::env::var("PATH")?),
+            )
+            .env("RUST_BACKTRACE", "0")
+            .arg("-c")
+            .arg(format!(
+                "cd '{}' && bash {}",
+                sandbox_canonical.display().to_string().replace('\\', "/"),
+                script_name
+            ));
+    } else {
+        shell
+            .env(
+                "PATH",
+                format!("{}:{}", get_sui_bin_path(), std::env::var("PATH")?),
+            )
+            .env("RUST_BACKTRACE", "0")
+            .current_dir(&sandbox_canonical)
+            .arg(path.file_name().unwrap());
+    }
 
     if let Some(ref cluster) = cluster {
         shell.env("CONFIG", cluster.swarm.dir().join(SUI_CLIENT_CONFIG));
