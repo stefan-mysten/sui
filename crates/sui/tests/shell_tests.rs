@@ -76,9 +76,9 @@ async fn test_shell_snapshot(path: &Path) -> datatest_stable::Result<()> {
     );
 
     let snapshot_name: String = path
-        .strip_prefix("tests/shell_tests")?
+        .strip_prefix(TEST_DIR)?
         .to_string_lossy()
-        .to_string();
+        .replace(std::path::MAIN_SEPARATOR, "/");
 
     insta::with_settings!({description => path.to_string_lossy(), omit_expression => true}, {
         insta::assert_snapshot!(snapshot_name, result);
