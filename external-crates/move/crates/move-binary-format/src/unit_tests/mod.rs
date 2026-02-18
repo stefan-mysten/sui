@@ -4,6 +4,7 @@
 
 mod binary_limits_tests;
 mod binary_tests;
+mod bytecode_strategy_tests;
 mod compatibility_tests;
 mod deserializer_tests;
 mod equivalence_tests;

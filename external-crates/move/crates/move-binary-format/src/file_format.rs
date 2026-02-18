@@ -1330,8 +1330,6 @@ pub struct CodeUnit {
 /// Bytecodes operate on a stack machine and each bytecode has side effect on the stack and the
 /// instruction stream.
 #[derive(Clone, Hash, Eq, VariantCount, PartialEq)]
-#[cfg_attr(any(test, feature = "fuzzing"), derive(proptest_derive::Arbitrary))]
-#[cfg_attr(any(test, feature = "fuzzing"), proptest(no_params))]
 #[cfg_attr(feature = "fuzzing", derive(arbitrary::Arbitrary))]
 #[cfg_attr(feature = "wasm", derive(Serialize, Deserialize))]
 pub enum Bytecode {
@@ -1830,6 +1828,254 @@ pub enum Bytecode {
     ImmBorrowGlobalDeprecated(StructDefinitionIndex),
     ImmBorrowGlobalGenericDeprecated(StructDefInstantiationIndex),
     // ******** END DEPRECATED BYTECODES ********
+}
+
+#[cfg(any(test, feature = "fuzzing"))]
+fn bytecode_weighted_strategies() -> Vec<(u32, BoxedStrategy<Bytecode>)> {
+    use Bytecode::*;
+
+    vec![
+        (1, Just(Pop).boxed()),
+        (1, Just(Ret).boxed()),
+        (1, any::<CodeOffset>().prop_map(BrTrue).boxed()),
+        (1, any::<CodeOffset>().prop_map(BrFalse).boxed()),
+        (1, any::<CodeOffset>().prop_map(Branch).boxed()),
+        (1, any::<u8>().prop_map(LdU8).boxed()),
+        (1, any::<u64>().prop_map(LdU64).boxed()),
+        (
+            1,
+            any::<u128>()
+                .prop_map(|value| LdU128(Box::new(value)))
+                .boxed(),
+        ),
+        (1, Just(CastU8).boxed()),
+        (1, Just(CastU64).boxed()),
+        (1, Just(CastU128).boxed()),
+        (1, any::<ConstantPoolIndex>().prop_map(LdConst).boxed()),
+        (1, Just(LdTrue).boxed()),
+        (1, Just(LdFalse).boxed()),
+        (1, any::<LocalIndex>().prop_map(CopyLoc).boxed()),
+        (1, any::<LocalIndex>().prop_map(MoveLoc).boxed()),
+        (1, any::<LocalIndex>().prop_map(StLoc).boxed()),
+        (1, any::<FunctionHandleIndex>().prop_map(Call).boxed()),
+        (
+            1,
+            any::<FunctionInstantiationIndex>()
+                .prop_map(CallGeneric)
+                .boxed(),
+        ),
+        (1, any::<StructDefinitionIndex>().prop_map(Pack).boxed()),
+        (
+            1,
+            any::<StructDefInstantiationIndex>()
+                .prop_map(PackGeneric)
+                .boxed(),
+        ),
+        (1, any::<StructDefinitionIndex>().prop_map(Unpack).boxed()),
+        (
+            1,
+            any::<StructDefInstantiationIndex>()
+                .prop_map(UnpackGeneric)
+                .boxed(),
+        ),
+        (1, Just(ReadRef).boxed()),
+        (1, Just(WriteRef).boxed()),
+        (1, Just(FreezeRef).boxed()),
+        (1, any::<LocalIndex>().prop_map(MutBorrowLoc).boxed()),
+        (1, any::<LocalIndex>().prop_map(ImmBorrowLoc).boxed()),
+        (
+            1,
+            any::<FieldHandleIndex>().prop_map(MutBorrowField).boxed(),
+        ),
+        (
+            1,
+            any::<FieldInstantiationIndex>()
+                .prop_map(MutBorrowFieldGeneric)
+                .boxed(),
+        ),
+        (
+            1,
+            any::<FieldHandleIndex>().prop_map(ImmBorrowField).boxed(),
+        ),
+        (
+            1,
+            any::<FieldInstantiationIndex>()
+                .prop_map(ImmBorrowFieldGeneric)
+                .boxed(),
+        ),
+        (1, Just(Add).boxed()),
+        (1, Just(Sub).boxed()),
+        (1, Just(Mul).boxed()),
+        (1, Just(Mod).boxed()),
+        (1, Just(Div).boxed()),
+        (1, Just(BitOr).boxed()),
+        (1, Just(BitAnd).boxed()),
+        (1, Just(Xor).boxed()),
+        (1, Just(Or).boxed()),
+        (1, Just(And).boxed()),
+        (1, Just(Not).boxed()),
+        (1, Just(Eq).boxed()),
+        (1, Just(Neq).boxed()),
+        (1, Just(Lt).boxed()),
+        (1, Just(Gt).boxed()),
+        (1, Just(Le).boxed()),
+        (1, Just(Ge).boxed()),
+        (1, Just(Abort).boxed()),
+        (1, Just(Nop).boxed()),
+        (1, Just(Shl).boxed()),
+        (1, Just(Shr).boxed()),
+        (
+            1,
+            (any::<SignatureIndex>(), any::<u64>())
+                .prop_map(|(sig_idx, count)| VecPack(sig_idx, count))
+                .boxed(),
+        ),
+        (1, any::<SignatureIndex>().prop_map(VecLen).boxed()),
+        (1, any::<SignatureIndex>().prop_map(VecImmBorrow).boxed()),
+        (1, any::<SignatureIndex>().prop_map(VecMutBorrow).boxed()),
+        (1, any::<SignatureIndex>().prop_map(VecPushBack).boxed()),
+        (1, any::<SignatureIndex>().prop_map(VecPopBack).boxed()),
+        (
+            1,
+            (any::<SignatureIndex>(), any::<u64>())
+                .prop_map(|(sig_idx, count)| VecUnpack(sig_idx, count))
+                .boxed(),
+        ),
+        (1, any::<SignatureIndex>().prop_map(VecSwap).boxed()),
+        (1, any::<u16>().prop_map(LdU16).boxed()),
+        (1, any::<u32>().prop_map(LdU32).boxed()),
+        (
+            1,
+            any::<move_core_types::u256::U256>()
+                .prop_map(|value| LdU256(Box::new(value)))
+                .boxed(),
+        ),
+        (1, Just(CastU16).boxed()),
+        (1, Just(CastU32).boxed()),
+        (1, Just(CastU256).boxed()),
+        (1, any::<VariantHandleIndex>().prop_map(PackVariant).boxed()),
+        (
+            1,
+            any::<VariantInstantiationHandleIndex>()
+                .prop_map(PackVariantGeneric)
+                .boxed(),
+        ),
+        (
+            1,
+            any::<VariantHandleIndex>().prop_map(UnpackVariant).boxed(),
+        ),
+        (
+            1,
+            any::<VariantHandleIndex>()
+                .prop_map(UnpackVariantImmRef)
+                .boxed(),
+        ),
+        (
+            1,
+            any::<VariantHandleIndex>()
+                .prop_map(UnpackVariantMutRef)
+                .boxed(),
+        ),
+        (
+            1,
+            any::<VariantInstantiationHandleIndex>()
+                .prop_map(UnpackVariantGeneric)
+                .boxed(),
+        ),
+        (
+            1,
+            any::<VariantInstantiationHandleIndex>()
+                .prop_map(UnpackVariantGenericImmRef)
+                .boxed(),
+        ),
+        (
+            1,
+            any::<VariantInstantiationHandleIndex>()
+                .prop_map(UnpackVariantGenericMutRef)
+                .boxed(),
+        ),
+        (
+            1,
+            any::<VariantJumpTableIndex>()
+                .prop_map(VariantSwitch)
+                .boxed(),
+        ),
+        (
+            1,
+            any::<StructDefinitionIndex>()
+                .prop_map(ExistsDeprecated)
+                .boxed(),
+        ),
+        (
+            1,
+            any::<StructDefInstantiationIndex>()
+                .prop_map(ExistsGenericDeprecated)
+                .boxed(),
+        ),
+        (
+            1,
+            any::<StructDefinitionIndex>()
+                .prop_map(MoveFromDeprecated)
+                .boxed(),
+        ),
+        (
+            1,
+            any::<StructDefInstantiationIndex>()
+                .prop_map(MoveFromGenericDeprecated)
+                .boxed(),
+        ),
+        (
+            1,
+            any::<StructDefinitionIndex>()
+                .prop_map(MoveToDeprecated)
+                .boxed(),
+        ),
+        (
+            1,
+            any::<StructDefInstantiationIndex>()
+                .prop_map(MoveToGenericDeprecated)
+                .boxed(),
+        ),
+        (
+            1,
+            any::<StructDefinitionIndex>()
+                .prop_map(MutBorrowGlobalDeprecated)
+                .boxed(),
+        ),
+        (
+            1,
+            any::<StructDefInstantiationIndex>()
+                .prop_map(MutBorrowGlobalGenericDeprecated)
+                .boxed(),
+        ),
+        (
+            1,
+            any::<StructDefinitionIndex>()
+                .prop_map(ImmBorrowGlobalDeprecated)
+                .boxed(),
+        ),
+        (
+            1,
+            any::<StructDefInstantiationIndex>()
+                .prop_map(ImmBorrowGlobalGenericDeprecated)
+                .boxed(),
+        ),
+    ]
+}
+
+#[cfg(test)]
+pub(crate) fn bytecode_strategy_variant_count() -> usize {
+    bytecode_weighted_strategies().len()
+}
+
+#[cfg(any(test, feature = "fuzzing"))]
+impl Arbitrary for Bytecode {
+    type Strategy = BoxedStrategy<Self>;
+    type Parameters = ();
+
+    fn arbitrary_with(_params: Self::Parameters) -> Self::Strategy {
+        proptest::strategy::Union::new_weighted(bytecode_weighted_strategies()).boxed()
+    }
 }
 
 impl ::std::fmt::Debug for Bytecode {
