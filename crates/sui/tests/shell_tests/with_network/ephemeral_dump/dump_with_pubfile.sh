@@ -9,6 +9,8 @@
 # dependency's original-id from the ephemeral pubfile appears in the compiled
 # bytecode.
 
+set -euo pipefail
+
 # Get the chain ID from the network
 chain_id=$(sui client --client.config $CONFIG chain-identifier)
 
@@ -34,9 +36,14 @@ EOF
 sui move --client.config "$CONFIG" \
   build -p main_pkg --dump --pubfile-path Pub.test.toml -e testnet --no-tree-shaking > output.json
 
-tr -d '\r' < output.json | grep -E '^(INCLUDING DEPENDENCY|BUILDING )' >&2 || true
-
-tr -d '\r\n' < output.json | sed -n 's/.*"modules"[[:space:]]*:[[:space:]]*\[[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1 | base64 -d > main.mv
+module_b64="$(sed -n 's/.*"modules"[[:space:]]*:[[:space:]]*\[[[:space:]]*"\([^"]*\)".*/\1/p' output.json | head -n 1)"
+module_b64="${module_b64//$'\r'/}"
+if [ -z "$module_b64" ]; then
+  echo "failed to extract modules[0] from output.json" >&2
+  cat output.json >&2
+  exit 1
+fi
+printf '%s' "$module_b64" | base64 -d > main.mv
 sui move disassemble main.mv > main.move
 
 echo
