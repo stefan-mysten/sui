@@ -116,6 +116,7 @@ impl Merge<&crate::full_checkpoint_content::ExecutedTransaction> for ExecutedTra
 impl TryFrom<&Checkpoint> for crate::full_checkpoint_content::Checkpoint {
     type Error = TryFromProtoError;
 
+    #[allow(clippy::result_large_err)]
     fn try_from(checkpoint: &Checkpoint) -> Result<Self, Self::Error> {
         let summary = checkpoint
             .summary()
@@ -168,6 +169,7 @@ impl TryFrom<&Checkpoint> for crate::full_checkpoint_content::Checkpoint {
 impl TryFrom<&ExecutedTransaction> for crate::full_checkpoint_content::ExecutedTransaction {
     type Error = TryFromProtoError;
 
+    #[allow(clippy::result_large_err)]
     fn try_from(value: &ExecutedTransaction) -> Result<Self, Self::Error> {
         Ok(Self {
             transaction: value
@@ -967,6 +969,7 @@ impl TryFrom<&SystemState>
 {
     type Error = TryFromProtoError;
 
+    #[allow(clippy::result_large_err)]
     fn try_from(s: &SystemState) -> Result<Self, Self::Error> {
         Ok(Self {
             epoch: s.epoch(),
@@ -1576,6 +1579,7 @@ impl From<crate::committee::Committee> for ValidatorCommittee {
 impl TryFrom<&ValidatorCommittee> for crate::committee::Committee {
     type Error = TryFromProtoError;
 
+    #[allow(clippy::result_large_err)]
     fn try_from(s: &ValidatorCommittee) -> Result<Self, Self::Error> {
         let members = s
             .members()
