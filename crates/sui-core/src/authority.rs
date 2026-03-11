@@ -5107,6 +5107,7 @@ impl AuthorityState {
     }
 
     #[instrument(level = "trace", skip_all)]
+    #[allow(clippy::result_large_err)]
     pub async fn query_events(
         &self,
         kv_store: &Arc<TransactionKeyValueStore>,
