@@ -676,6 +676,7 @@ impl LocalExec {
             .map_err(|e| ReplayEngineError::SuiRpcError { err: e.to_string() })
     }
 
+    #[allow(clippy::result_large_err)]
     pub async fn execute_all_in_checkpoints(
         &mut self,
         checkpoint_ids: &[u64],
@@ -1415,6 +1416,7 @@ impl LocalExec {
         Ok(mapping)
     }
 
+    #[allow(clippy::result_large_err)]
     pub async fn get_protocol_config(
         &self,
         epoch_id: EpochId,
@@ -1711,6 +1713,7 @@ impl LocalExec {
         })
     }
 
+    #[allow(clippy::result_large_err)]
     async fn resolve_download_input_objects(
         &mut self,
         tx_info: &OnChainTransactionInfo,

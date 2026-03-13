@@ -346,6 +346,7 @@ impl RemoteFetcher {
 }
 
 #[async_trait]
+#[allow(clippy::result_large_err)]
 impl DataFetcher for RemoteFetcher {
     #![allow(implied_bounds_entailment)]
     async fn multi_get_versioned(
@@ -712,6 +713,7 @@ impl NodeStateDumpFetcher {
 }
 
 #[async_trait]
+#[allow(clippy::result_large_err)]
 impl DataFetcher for NodeStateDumpFetcher {
     async fn multi_get_versioned(
         &self,

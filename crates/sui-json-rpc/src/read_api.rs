@@ -418,10 +418,10 @@ impl ReadApi {
 
         // fill cache with the timestamp
         for (_, cache_entry) in temp_response.iter_mut() {
-            if cache_entry.checkpoint_seq.is_some() {
+            if let Some(checkpoint_seq) = cache_entry.checkpoint_seq {
                 // safe to unwrap because is_some is checked
                 cache_entry.timestamp = *checkpoint_to_timestamp
-                    .get(cache_entry.checkpoint_seq.as_ref().unwrap())
+                    .get(&checkpoint_seq)
                     // Safe to unwrap because checkpoint_seq is guaranteed to exist in checkpoint_to_timestamp
                     .unwrap();
             }

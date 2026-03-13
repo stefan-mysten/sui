@@ -487,6 +487,7 @@ pub trait SuiClientInner: Send + Sync {
 }
 
 #[async_trait]
+#[allow(clippy::result_large_err)]
 impl SuiClientInner for sui_rpc_api::Client {
     async fn get_events_by_tx_digest(
         &self,
