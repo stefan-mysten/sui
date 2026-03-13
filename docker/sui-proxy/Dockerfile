@@ -1,4 +1,4 @@
-FROM rust:1.93-bullseye as build
+FROM rust:1.94-bullseye as build
 
 ARG PROFILE=release
 WORKDIR /work
