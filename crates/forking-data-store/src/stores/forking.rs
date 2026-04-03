@@ -128,7 +128,14 @@ where
         &self,
         _sequence: CheckpointSequenceNumber,
     ) -> Result<Option<CheckpointData>, Error> {
-        todo!("ForkingStore checkpoint reads are not implemented in the skeleton")
+        let primary = self.primary();
+        let secondary = self.secondary();
+
+        // read from primary first and return if found, otherwise read from secondary
+        match primary.get_checkpoint_by_sequence_number(_sequence)? {
+            Some(checkpoint) => Ok(Some(checkpoint)),
+            None => secondary.get_checkpoint_by_sequence_number(_sequence),
+        }
     }
 
     fn get_latest_checkpoint(&self) -> Result<Option<CheckpointData>, Error> {
