@@ -3,7 +3,7 @@
 
 use std::io::Write;
 
-use anyhow::{Error, Result};
+use anyhow::{Error, Result, anyhow};
 
 use sui_types::{
     digests::{CheckpointContentsDigest, CheckpointDigest},
@@ -99,8 +99,46 @@ where
     P: ObjectStoreWriter,
     S: ObjectStore,
 {
-    fn get_objects(&self, _keys: &[ObjectKey]) -> Result<Vec<Option<(Object, u64)>>, Error> {
-        todo!("ForkingStore object reads are not implemented in the skeleton")
+    fn get_objects(&self, keys: &[ObjectKey]) -> Result<Vec<Option<(Object, u64)>>, Error> {
+        let primary = self.primary();
+        let secondary = self.secondary();
+
+        let mut objects = primary.get_objects(keys)?;
+        if objects.len() != keys.len() {
+            return Err(anyhow!(
+                "primary object store returned {} entries for {} keys",
+                objects.len(),
+                keys.len(),
+            ));
+        }
+
+        let missing_indices = objects
+            .iter()
+            .enumerate()
+            .filter_map(|(index, object)| object.is_none().then_some(index))
+            .collect::<Vec<_>>();
+        if missing_indices.is_empty() {
+            return Ok(objects);
+        }
+
+        let missing_keys = missing_indices
+            .iter()
+            .map(|&index| keys[index].clone())
+            .collect::<Vec<_>>();
+        let missing_objects = secondary.get_objects(&missing_keys)?;
+        if missing_objects.len() != missing_keys.len() {
+            return Err(anyhow!(
+                "secondary object store returned {} entries for {} keys",
+                missing_objects.len(),
+                missing_keys.len(),
+            ));
+        }
+
+        for (index, object) in missing_indices.into_iter().zip(missing_objects) {
+            objects[index] = object;
+        }
+
+        Ok(objects)
     }
 }
 
@@ -185,5 +223,143 @@ where
         writeln!(writer, "ForkingStore")?;
         self.primary.summary(writer)?;
         self.secondary.summary(writer)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{collections::BTreeMap, sync::Mutex};
+
+    use super::*;
+    use crate::VersionQuery;
+    use sui_types::base_types::ObjectID;
+
+    struct MockObjectStore {
+        objects: BTreeMap<ObjectKey, Option<(Object, u64)>>,
+        calls: Mutex<Vec<Vec<ObjectKey>>>,
+    }
+
+    impl MockObjectStore {
+        fn new(objects: impl IntoIterator<Item = (ObjectKey, Option<(Object, u64)>)>) -> Self {
+            Self {
+                objects: objects.into_iter().collect(),
+                calls: Mutex::new(vec![]),
+            }
+        }
+
+        fn calls(&self) -> Vec<Vec<ObjectKey>> {
+            self.calls
+                .lock()
+                .expect("calls mutex should not be poisoned")
+                .clone()
+        }
+    }
+
+    impl ObjectStore for MockObjectStore {
+        fn get_objects(&self, keys: &[ObjectKey]) -> Result<Vec<Option<(Object, u64)>>, Error> {
+            self.calls
+                .lock()
+                .expect("calls mutex should not be poisoned")
+                .push(keys.to_vec());
+            Ok(keys
+                .iter()
+                .map(|key| self.objects.get(key).cloned().unwrap_or(None))
+                .collect())
+        }
+    }
+
+    impl ObjectStoreWriter for MockObjectStore {
+        fn write_object(
+            &self,
+            _key: &ObjectKey,
+            _object: Object,
+            _actual_version: u64,
+        ) -> Result<(), Error> {
+            Ok(())
+        }
+    }
+
+    fn test_key(object: &Object, version_query: VersionQuery) -> ObjectKey {
+        ObjectKey {
+            object_id: object.id(),
+            version_query,
+        }
+    }
+
+    #[test]
+    fn get_objects_returns_primary_hits_without_secondary_read() {
+        let object = Object::immutable_with_id_for_testing(ObjectID::random());
+        let key = test_key(&object, VersionQuery::Version(object.version().value()));
+
+        let primary = MockObjectStore::new([(
+            key.clone(),
+            Some((object.clone(), object.version().value())),
+        )]);
+        let secondary = MockObjectStore::new([]);
+        let store = ForkingStore::new(primary, secondary);
+
+        let objects = store
+            .get_objects(std::slice::from_ref(&key))
+            .expect("object lookup should succeed");
+
+        assert_eq!(
+            objects,
+            vec![Some((object.clone(), object.version().value()))]
+        );
+        assert_eq!(store.primary().calls(), vec![vec![key]]);
+        assert!(store.secondary().calls().is_empty());
+    }
+
+    #[test]
+    fn get_objects_reads_missing_entries_from_secondary_and_preserves_order() {
+        let primary_object = Object::immutable_with_id_for_testing(ObjectID::random());
+        let secondary_object = Object::immutable_with_id_for_testing(ObjectID::random());
+        let missing_object_id = ObjectID::random();
+
+        let primary_key = test_key(
+            &primary_object,
+            VersionQuery::Version(primary_object.version().value()),
+        );
+        let secondary_key = test_key(&secondary_object, VersionQuery::RootVersion(17));
+        let missing_key = ObjectKey {
+            object_id: missing_object_id,
+            version_query: VersionQuery::AtCheckpoint(29),
+        };
+
+        let primary = MockObjectStore::new([(
+            primary_key.clone(),
+            Some((primary_object.clone(), primary_object.version().value())),
+        )]);
+        let secondary = MockObjectStore::new([
+            (
+                secondary_key.clone(),
+                Some((secondary_object.clone(), secondary_object.version().value())),
+            ),
+            (missing_key.clone(), None),
+        ]);
+        let store = ForkingStore::new(primary, secondary);
+
+        let keys = vec![
+            primary_key.clone(),
+            secondary_key.clone(),
+            missing_key.clone(),
+        ];
+        let objects = store
+            .get_objects(&keys)
+            .expect("object lookup should succeed");
+
+        assert_eq!(
+            objects,
+            vec![
+                Some((primary_object.clone(), primary_object.version().value())),
+                Some((secondary_object.clone(), secondary_object.version().value())),
+                None,
+            ]
+        );
+        assert_eq!(store.primary().calls(), vec![keys]);
+        assert_eq!(
+            store.secondary().calls(),
+            vec![vec![secondary_key, missing_key]]
+        );
     }
 }
