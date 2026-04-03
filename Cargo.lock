@@ -15133,6 +15133,7 @@ dependencies = [
  "bin-version",
  "tokio",
  "tracing-subscriber",
+ "url",
 ]
 
 [[package]]

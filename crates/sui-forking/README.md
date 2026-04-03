@@ -17,6 +17,9 @@ A development tool that enables testing and developing against a local Sui netwo
 - Develop locally while maintaining consistency with production state
 - Run integration tests against forked network state and using packages deployed on the real live network
 
+Current bootstrap work already supports parsing source network inputs as `mainnet`, `testnet`,
+`devnet`, or a custom `http(s)` GraphQL URL.
+
 **Important Note**
 Unlike a standard local Sui network with validators, the forking tool runs in lock-step mode where each transaction is executed sequentially and creates a checkpoint.
 That means that you have full control over the advancement of checkpoints, time, and epochs to simulate different scenarios.
@@ -43,4 +46,3 @@ The table below summarizes when to use each option:
 - Forking from a checkpoint older than 1 hour requires explicit object seeding (you need to know which owned objects you want to have pulled at startup)
 - If it forks at checkpoint X, you cannot depend on objects created after checkpoint X from the actual real network. You'll need to restart the network at that checkpoint or a later one.
 - Sequential execution: Transactions are executed one at a time, no parallelism.
-

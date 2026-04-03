@@ -10,6 +10,7 @@ edition = "2024"
 anyhow.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tracing-subscriber.workspace = true
+url.workspace = true
 
 bin-version.workspace = true
 
