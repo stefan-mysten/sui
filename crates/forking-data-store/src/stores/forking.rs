@@ -14,110 +14,100 @@ use sui_types::{
 
 use crate::{
     CheckpointData, CheckpointStore, CheckpointStoreWriter, EpochData, EpochStore,
-    EpochStoreWriter, ObjectKey, ObjectStore, ObjectStoreWriter, StoreSummary, TransactionInfo,
-    TransactionStore, TransactionStoreWriter,
+    EpochStoreWriter, ObjectKey, ObjectStore, ObjectStoreWriter, SetupStore, StoreSummary,
+    TransactionInfo, TransactionStore, TransactionStoreWriter,
 };
 
-/// A router that delegates each capability to a dedicated store.
+/// Forking store over a primary and secondary store. In the POC, the expectation is that primary
+/// is a FileSystemStore and secondary is a GraphQLStore, to keep things simple.
 #[derive(Debug)]
-pub struct ForkingStore<Tx, Epoch, Obj, Ckpt> {
-    transactions: Tx,
-    epochs: Epoch,
-    objects: Obj,
-    checkpoints: Ckpt,
+pub struct ForkingStore<P, S> {
+    primary: P,
+    secondary: S,
 }
 
-impl<Tx, Epoch, Obj, Ckpt> ForkingStore<Tx, Epoch, Obj, Ckpt> {
+impl<P, S> ForkingStore<P, S> {
     /// Create a new forking store.
-    pub fn new(transactions: Tx, epochs: Epoch, objects: Obj, checkpoints: Ckpt) -> Self {
-        Self {
-            transactions,
-            epochs,
-            objects,
-            checkpoints,
-        }
+    pub fn new(primary: P, secondary: S) -> Self {
+        Self { primary, secondary }
     }
 
-    /// Return the transaction store.
-    pub fn transactions(&self) -> &Tx {
-        &self.transactions
+    /// Return the primary layer.
+    pub fn primary(&self) -> &P {
+        &self.primary
     }
 
-    /// Return the epoch store.
-    pub fn epochs(&self) -> &Epoch {
-        &self.epochs
-    }
-
-    /// Return the object store.
-    pub fn objects(&self) -> &Obj {
-        &self.objects
-    }
-
-    /// Return the checkpoint store.
-    pub fn checkpoints(&self) -> &Ckpt {
-        &self.checkpoints
+    /// Return the secondary layer.
+    pub fn secondary(&self) -> &S {
+        &self.secondary
     }
 }
 
-impl<Tx, Epoch, Obj, Ckpt> TransactionStore for ForkingStore<Tx, Epoch, Obj, Ckpt>
+impl<P, S> TransactionStore for ForkingStore<P, S>
 where
-    Tx: TransactionStore,
+    P: TransactionStoreWriter,
+    S: TransactionStore,
 {
     fn transaction_data_and_effects(
         &self,
         _tx_digest: &str,
     ) -> Result<Option<TransactionInfo>, Error> {
-        todo!("forking transaction routing is not implemented in the skeleton")
+        todo!("ForkingStore transaction reads are not implemented in the skeleton")
     }
 }
 
-impl<Tx, Epoch, Obj, Ckpt> TransactionStoreWriter for ForkingStore<Tx, Epoch, Obj, Ckpt>
+impl<P, S> TransactionStoreWriter for ForkingStore<P, S>
 where
-    Tx: TransactionStoreWriter,
+    P: TransactionStoreWriter,
+    S: TransactionStore,
 {
     fn write_transaction(
         &self,
         _tx_digest: &str,
         _transaction_info: TransactionInfo,
     ) -> Result<(), Error> {
-        todo!("forking transaction writes are not implemented in the skeleton")
+        todo!("ForkingStore transaction writes are not implemented in the skeleton")
     }
 }
 
-impl<Tx, Epoch, Obj, Ckpt> EpochStore for ForkingStore<Tx, Epoch, Obj, Ckpt>
+impl<P, S> EpochStore for ForkingStore<P, S>
 where
-    Epoch: EpochStore,
+    P: EpochStoreWriter,
+    S: EpochStore,
 {
     fn epoch_info(&self, _epoch: u64) -> Result<Option<EpochData>, Error> {
-        todo!("forking epoch routing is not implemented in the skeleton")
+        todo!("ForkingStore epoch reads are not implemented in the skeleton")
     }
 
     fn protocol_config(&self, _epoch: u64) -> Result<Option<ProtocolConfig>, Error> {
-        todo!("forking protocol-config routing is not implemented in the skeleton")
+        todo!("ForkingStore protocol-config reads are not implemented in the skeleton")
     }
 }
 
-impl<Tx, Epoch, Obj, Ckpt> EpochStoreWriter for ForkingStore<Tx, Epoch, Obj, Ckpt>
+impl<P, S> EpochStoreWriter for ForkingStore<P, S>
 where
-    Epoch: EpochStoreWriter,
+    P: EpochStoreWriter,
+    S: EpochStore,
 {
     fn write_epoch_info(&self, _epoch: u64, _epoch_data: EpochData) -> Result<(), Error> {
-        todo!("forking epoch writes are not implemented in the skeleton")
+        todo!("ForkingStore epoch writes are not implemented in the skeleton")
     }
 }
 
-impl<Tx, Epoch, Obj, Ckpt> ObjectStore for ForkingStore<Tx, Epoch, Obj, Ckpt>
+impl<P, S> ObjectStore for ForkingStore<P, S>
 where
-    Obj: ObjectStore,
+    P: ObjectStoreWriter,
+    S: ObjectStore,
 {
     fn get_objects(&self, _keys: &[ObjectKey]) -> Result<Vec<Option<(Object, u64)>>, Error> {
-        todo!("forking object routing is not implemented in the skeleton")
+        todo!("ForkingStore object reads are not implemented in the skeleton")
     }
 }
 
-impl<Tx, Epoch, Obj, Ckpt> ObjectStoreWriter for ForkingStore<Tx, Epoch, Obj, Ckpt>
+impl<P, S> ObjectStoreWriter for ForkingStore<P, S>
 where
-    Obj: ObjectStoreWriter,
+    P: ObjectStoreWriter,
+    S: ObjectStore,
 {
     fn write_object(
         &self,
@@ -125,61 +115,68 @@ where
         _object: Object,
         _actual_version: u64,
     ) -> Result<(), Error> {
-        todo!("forking object writes are not implemented in the skeleton")
+        todo!("ForkingStore object writes are not implemented in the skeleton")
     }
 }
 
-impl<Tx, Epoch, Obj, Ckpt> CheckpointStore for ForkingStore<Tx, Epoch, Obj, Ckpt>
+impl<P, S> CheckpointStore for ForkingStore<P, S>
 where
-    Ckpt: CheckpointStore,
+    P: CheckpointStoreWriter,
+    S: CheckpointStore,
 {
     fn get_checkpoint_by_sequence_number(
         &self,
         _sequence: CheckpointSequenceNumber,
     ) -> Result<Option<CheckpointData>, Error> {
-        todo!("forking checkpoint routing is not implemented in the skeleton")
+        todo!("ForkingStore checkpoint reads are not implemented in the skeleton")
     }
 
     fn get_latest_checkpoint(&self) -> Result<Option<CheckpointData>, Error> {
-        todo!("forking latest-checkpoint routing is not implemented in the skeleton")
+        todo!("ForkingStore latest-checkpoint lookup is not implemented in the skeleton")
     }
 
     fn get_sequence_by_checkpoint_digest(
         &self,
         _digest: &CheckpointDigest,
     ) -> Result<Option<CheckpointSequenceNumber>, Error> {
-        todo!("forking checkpoint-digest routing is not implemented in the skeleton")
+        todo!("ForkingStore checkpoint-digest lookups are not implemented in the skeleton")
     }
 
     fn get_sequence_by_contents_digest(
         &self,
         _digest: &CheckpointContentsDigest,
     ) -> Result<Option<CheckpointSequenceNumber>, Error> {
-        todo!("forking contents-digest routing is not implemented in the skeleton")
+        todo!("ForkingStore contents-digest lookups are not implemented in the skeleton")
     }
 }
 
-impl<Tx, Epoch, Obj, Ckpt> CheckpointStoreWriter for ForkingStore<Tx, Epoch, Obj, Ckpt>
+impl<P, S> CheckpointStoreWriter for ForkingStore<P, S>
 where
-    Ckpt: CheckpointStoreWriter,
+    P: CheckpointStoreWriter,
+    S: CheckpointStore,
 {
     fn write_checkpoint(&self, _checkpoint: &CheckpointData) -> Result<(), Error> {
-        todo!("forking checkpoint writes are not implemented in the skeleton")
+        todo!("ForkingStore checkpoint writes are not implemented in the skeleton")
     }
 }
 
-impl<Tx, Epoch, Obj, Ckpt> StoreSummary for ForkingStore<Tx, Epoch, Obj, Ckpt>
+impl<P, S> SetupStore for ForkingStore<P, S>
 where
-    Tx: StoreSummary,
-    Epoch: StoreSummary,
-    Obj: StoreSummary,
-    Ckpt: StoreSummary,
+    P: SetupStore,
+{
+    fn setup(&self, _chain_id: Option<String>) -> Result<Option<String>, Error> {
+        todo!("ForkingStore setup is not implemented in the skeleton")
+    }
+}
+
+impl<P, S> StoreSummary for ForkingStore<P, S>
+where
+    P: StoreSummary,
+    S: StoreSummary,
 {
     fn summary<W: Write>(&self, writer: &mut W) -> Result<()> {
         writeln!(writer, "ForkingStore")?;
-        self.transactions.summary(writer)?;
-        self.epochs.summary(writer)?;
-        self.objects.summary(writer)?;
-        self.checkpoints.summary(writer)
+        self.primary.summary(writer)?;
+        self.secondary.summary(writer)
     }
 }

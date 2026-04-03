@@ -5936,6 +5936,7 @@ dependencies = [
  "lru 0.10.1",
  "prost 0.14.1",
  "reqwest",
+ "roaring 0.10.9",
  "serde",
  "sui-rpc",
  "sui-rpc-api",

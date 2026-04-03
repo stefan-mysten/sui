@@ -35,7 +35,7 @@
 //!       <sequence>.binpb.zst
 //! ```
 //!
-//! The `checkpoint/` directory is intended to store full checkpoint payloads
+//! The `checkpoint/` directory is intended to store verified checkpoint summaries
 //! and the indexes needed to resolve checkpoint and contents digests back to a
 //! sequence number.
 //!
@@ -47,7 +47,7 @@
 //! - Epoch files in `epoch/<epoch_id>` store `EpochFileData` as BCS, capturing epoch metadata.
 //! - Object files in `objects/<object_id>/<version>` store the `Object` at the corresponding
 //!   version as BCS.
-//! - Checkpoint files in `checkpoint/<sequence>.binpb.zst` store the `CheckpointData` as a
+//! - Checkpoint files in `checkpoint/<sequence>.binpb.zst` store checkpoint summaries in a
 //!   compressed protobuf payload.
 //!
 //! # Version Mapping Files

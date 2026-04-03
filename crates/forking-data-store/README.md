@@ -11,7 +11,7 @@ after the GraphQL schema in `crates/sui-indexer-alt-graphql/schema.graphql`.
 - `TransactionStore` / `TransactionStoreWriter`
 - `EpochStore` / `EpochStoreWriter`
 - `ObjectStore` / `ObjectStoreWriter`
-- `CheckpointStore` / `CheckpointStoreWriter`
+- `CheckpointStore` / `CheckpointStoreWriter` for `VerifiedCheckpoint` summaries
 
 `ReadDataStore` and `ReadWriteDataStore` remain convenience bundles for the
 transaction/epoch/object capability set.
@@ -20,55 +20,28 @@ transaction/epoch/object capability set.
 
 | Store | Description | Read | Write |
 |-------|-------------|------|-------|
-| `DataStore` | Remote GraphQL-backed store (mainnet/testnet) | Yes | No |
+| `GraphQLStore` | Remote GraphQL-backed store (mainnet/testnet) | Yes | No |
 | `FileSystemStore` | Persistent local disk cache | Yes | Yes |
-| `InMemoryStore` | Unbounded in-memory cache | Yes | Yes |
-| `LruMemoryStore` | Bounded LRU cache | Yes | Yes |
-| `ReadThroughStore` | Read-through cache over a source | Yes | Primary only |
-| `WriteThroughStore` | Hot cache over a writable backing store | Yes | Yes |
-| `ForkingStore` | Routes each capability to a different chain | Yes | Yes |
+| `ForkingStore` | Primary/secondary composition for cached reads | Yes | Primary only |
 
 ## Composition Primitives
 
-`ReadThroughStore<Primary, Secondary>`
+`ForkingStore<Primary, Secondary>`
 - Reads `Primary` first, falls back to `Secondary`, and caches successful misses into `Primary`.
 - Direct writes update `Primary` only.
-
-`WriteThroughStore<Primary, Secondary>`
-- Reads `Primary` first, falls back to `Secondary`, and caches successful misses into `Primary`.
-- Direct writes update `Secondary` first, then `Primary`.
-
-`ForkingStore<Tx, Epoch, Obj, Ckpt>`
-- Routes each capability to its dedicated chain.
-- It is a router, not a search-order combinator.
 
 ## Composition Examples
 
 ```rust
 use sui_data_store::{
     Node,
-    stores::{
-        ForkingStore, DataStore, FileSystemStore, InMemoryStore, ReadThroughStore,
-        WriteThroughStore,
-    },
+    stores::{FileSystemStore, ForkingStore, GraphQLStore},
 };
 
 // Filesystem -> GraphQL for object reads, persisting successful misses to disk.
-let graphql = DataStore::new(Node::Mainnet, "test-version")?;
+let graphql = GraphQLStore::new(Node::Mainnet, "test-version")?;
 let disk = FileSystemStore::new(Node::Mainnet)?;
-let disk_then_graphql = ReadThroughStore::new(disk, graphql);
-
-// In-memory -> filesystem for generic writable caching.
-let memory = InMemoryStore::new(Node::Mainnet);
-let disk = FileSystemStore::new(Node::Mainnet)?;
-let hot_mem_fs = WriteThroughStore::new(memory, disk);
-
-// Route different capabilities to different chains.
-let transactions = hot_mem_fs;
-let epochs = /* another chain or the same chain */;
-let objects = /* e.g. WriteThroughStore<InMemoryStore, ReadThroughStore<FileSystemStore, DataStore>> */;
-let checkpoints = /* another chain or the same chain */;
-let store = ForkingStore::new(transactions, epochs, objects, checkpoints);
+let store = ForkingStore::new(disk, graphql);
 ```
 
 ## Version Queries

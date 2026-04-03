@@ -1,9 +1,10 @@
 // Copyright (c) Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
+use std::future::Future;
 use std::io::Write;
 
-use anyhow::{Context, Error, Result};
+use anyhow::{Context, Error, Result, anyhow};
 use cynic::{GraphQlResponse, Operation};
 
 use sui_types::{
@@ -75,6 +76,24 @@ impl GraphQLStore {
     {
         todo!("GraphQL query execution is not implemented in the skeleton")
     }
+
+    fn block_on<T, F>(&self, future: F) -> Result<T, Error>
+    where
+        T: Send + 'static,
+        F: Future<Output = Result<T, Error>> + Send + 'static,
+    {
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            std::thread::spawn(move || handle.block_on(future))
+                .join()
+                .map_err(|_| anyhow!("GraphQL query worker thread panicked"))?
+        } else {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .context("failed to build temporary tokio runtime for GraphQL query")?
+                .block_on(future)
+        }
+    }
 }
 
 impl TransactionStore for GraphQLStore {
@@ -105,13 +124,19 @@ impl ObjectStore for GraphQLStore {
 impl CheckpointStore for GraphQLStore {
     fn get_checkpoint_by_sequence_number(
         &self,
-        _sequence: CheckpointSequenceNumber,
+        sequence: CheckpointSequenceNumber,
     ) -> Result<Option<CheckpointData>, Error> {
-        todo!("GraphQL checkpoint reads are not implemented in the skeleton")
+        let store = self.clone();
+        self.block_on(async move {
+            crate::gql_queries::checkpoint_query::query(Some(sequence), &store).await
+        })
     }
 
     fn get_latest_checkpoint(&self) -> Result<Option<CheckpointData>, Error> {
-        todo!("GraphQL latest-checkpoint lookup is not implemented in the skeleton")
+        let store = self.clone();
+        self.block_on(
+            async move { crate::gql_queries::checkpoint_query::query(None, &store).await },
+        )
     }
 
     fn get_sequence_by_checkpoint_digest(
@@ -130,8 +155,17 @@ impl CheckpointStore for GraphQLStore {
 }
 
 impl SetupStore for GraphQLStore {
-    fn setup(&self, _chain_id: Option<String>) -> Result<Option<String>, Error> {
-        todo!("GraphQL setup is not implemented in the skeleton")
+    fn setup(&self, chain_id: Option<String>) -> Result<Option<String>, Error> {
+        if let Some(chain_id) = chain_id {
+            return Ok(Some(chain_id));
+        }
+
+        let store = self.clone();
+        self.block_on(async move {
+            crate::gql_queries::chain_id_query::query(&store)
+                .await
+                .map(Some)
+        })
     }
 }
 
@@ -139,7 +173,7 @@ impl StoreSummary for GraphQLStore {
     fn summary<W: Write>(&self, writer: &mut W) -> Result<()> {
         writeln!(
             writer,
-            "DataStore(node={}, rpc={}, version={})",
+            "GraphQLStore(node={}, rpc={}, version={})",
             self.node.network_name(),
             self.rpc,
             self.version
