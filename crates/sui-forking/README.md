@@ -20,6 +20,9 @@ A development tool that enables testing and developing against a local Sui netwo
 Current bootstrap work already supports parsing source network inputs as `mainnet`, `testnet`,
 `devnet`, or a custom `http(s)` GraphQL URL.
 
+The crate also now includes a skeletal simulator data-store adapter that will back later bootstrap
+work. Its runtime store APIs are intentionally still unimplemented.
+
 **Important Note**
 Unlike a standard local Sui network with validators, the forking tool runs in lock-step mode where each transaction is executed sequentially and creates a checkpoint.
 That means that you have full control over the advancement of checkpoints, time, and epochs to simulate different scenarios.

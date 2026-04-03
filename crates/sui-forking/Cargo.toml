@@ -8,6 +8,9 @@ edition = "2024"
 
 [dependencies]
 anyhow.workspace = true
+forking-data-store = { path = "../forking-data-store" }
+simulacrum.workspace = true
+sui-types.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tracing-subscriber.workspace = true
 url.workspace = true

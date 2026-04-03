@@ -15131,6 +15131,9 @@ version = "1.70.0"
 dependencies = [
  "anyhow",
  "bin-version",
+ "forking-data-store",
+ "simulacrum",
+ "sui-types",
  "tokio",
  "tracing-subscriber",
  "url",
