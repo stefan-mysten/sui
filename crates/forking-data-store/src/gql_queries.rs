@@ -429,6 +429,111 @@ pub(crate) mod checkpoint_query {
         .with_context(|| format!("{} does not decode", label))?;
         bcs::from_bytes(&bytes).with_context(|| format!("cannot deserialize {}", label))
     }
+
+    #[cfg(test)]
+    mod tests {
+        use std::convert::TryFrom;
+
+        use fastcrypto::encoding::Base64 as FastCryptoBase64;
+        use sui_types::{
+            message_envelope::Message, test_checkpoint_data_builder::TestCheckpointBuilder,
+        };
+
+        use super::{Base64, Checkpoint, ValidatorAggregatedSignature, decode_checkpoint};
+
+        #[test]
+        fn decode_checkpoint_reconstructs_verified_checkpoint() {
+            let checkpoint = TestCheckpointBuilder::new(7).build_checkpoint();
+            let certified = checkpoint.summary;
+
+            let decoded = decode_checkpoint(Checkpoint {
+                summary_bcs: Some(Base64(
+                    FastCryptoBase64::from_bytes(
+                        &bcs::to_bytes(certified.data()).expect("summary should serialize"),
+                    )
+                    .encoded(),
+                )),
+                validator_signatures: Some(ValidatorAggregatedSignature {
+                    signature: Some(Base64(
+                        FastCryptoBase64::from_bytes(certified.auth_sig().signature.as_ref())
+                            .encoded(),
+                    )),
+                    signers_map: certified
+                        .auth_sig()
+                        .signers_map
+                        .iter()
+                        .map(|index| i32::try_from(index).expect("test signers fit in i32"))
+                        .collect(),
+                }),
+            })
+            .expect("checkpoint should decode");
+
+            assert_eq!(decoded.data(), certified.data());
+            assert_eq!(decoded.auth_sig().epoch, certified.auth_sig().epoch);
+            assert_eq!(
+                decoded.auth_sig().signature.as_ref(),
+                certified.auth_sig().signature.as_ref()
+            );
+            assert_eq!(
+                decoded.auth_sig().signers_map,
+                certified.auth_sig().signers_map
+            );
+        }
+
+        #[test]
+        fn decode_checkpoint_rejects_missing_validator_signatures() {
+            let checkpoint = TestCheckpointBuilder::new(7).build_checkpoint();
+
+            let error = decode_checkpoint(Checkpoint {
+                summary_bcs: Some(Base64(
+                    FastCryptoBase64::from_bytes(
+                        &bcs::to_bytes(checkpoint.summary.data())
+                            .expect("summary should serialize"),
+                    )
+                    .encoded(),
+                )),
+                validator_signatures: None,
+            })
+            .expect_err("missing validator signatures should fail");
+
+            assert!(
+                error
+                    .to_string()
+                    .contains("Missing validator signatures in checkpoint response")
+            );
+        }
+
+        #[test]
+        fn decode_checkpoint_rejects_negative_signer_indices() {
+            let checkpoint = TestCheckpointBuilder::new(7).build_checkpoint();
+
+            let error = decode_checkpoint(Checkpoint {
+                summary_bcs: Some(Base64(
+                    FastCryptoBase64::from_bytes(
+                        &bcs::to_bytes(checkpoint.summary.data())
+                            .expect("summary should serialize"),
+                    )
+                    .encoded(),
+                )),
+                validator_signatures: Some(ValidatorAggregatedSignature {
+                    signature: Some(Base64(
+                        FastCryptoBase64::from_bytes(
+                            checkpoint.summary.auth_sig().signature.as_ref(),
+                        )
+                        .encoded(),
+                    )),
+                    signers_map: vec![-1],
+                }),
+            })
+            .expect_err("negative signer index should fail");
+
+            assert!(
+                error
+                    .to_string()
+                    .contains("negative signer index in checkpoint signature")
+            );
+        }
+    }
 }
 
 pub(crate) mod chain_id_query {
