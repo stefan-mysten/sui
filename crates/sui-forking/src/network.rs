@@ -8,7 +8,7 @@
 
 use std::str::FromStr;
 
-use anyhow::anyhow;
+use anyhow::Context as _;
 use anyhow::bail;
 use url::Url;
 
@@ -22,7 +22,7 @@ pub enum ForkNetwork {
     /// Sui devnet.
     Devnet,
     /// Custom GraphQL endpoint URL.
-    Custom(String),
+    Custom(Url),
 }
 
 impl ForkNetwork {
@@ -40,9 +40,9 @@ impl ForkNetwork {
             "testnet" => Ok(Self::Testnet),
             "devnet" => Ok(Self::Devnet),
             _ => {
-                validate_custom_url(value)
-                    .map_err(|error| anyhow!("invalid network value '{value}': {error}"))?;
-                Ok(Self::Custom(value.to_owned()))
+                let url = parse_custom_url(value)
+                    .with_context(|| format!("invalid network value '{value}'"))?;
+                Ok(Self::Custom(url))
             }
         }
     }
@@ -56,11 +56,10 @@ impl FromStr for ForkNetwork {
     }
 }
 
-/// Validate a custom GraphQL endpoint URL.
-fn validate_custom_url(value: &str) -> anyhow::Result<()> {
-    let parsed = Url::parse(value).map_err(|error| {
-        anyhow!("expected mainnet, testnet, devnet, or a full http(s) URL ({error})")
-    })?;
+/// Parse and validate a custom GraphQL endpoint URL.
+fn parse_custom_url(value: &str) -> anyhow::Result<Url> {
+    let parsed = Url::parse(value)
+        .context("expected mainnet, testnet, devnet, or a full http(s) URL")?;
 
     match parsed.scheme() {
         "http" | "https" => {}
@@ -71,7 +70,7 @@ fn validate_custom_url(value: &str) -> anyhow::Result<()> {
         bail!("expected a URL with a host");
     }
 
-    Ok(())
+    Ok(parsed)
 }
 
 #[cfg(test)]
@@ -90,28 +89,28 @@ mod tests {
     }
 
     #[test]
-    fn parses_custom_graphql_url_without_rewriting() {
+    fn parses_custom_graphql_url() {
         let url = "https://example.com/custom/graphql";
 
         assert_eq!(
             ForkNetwork::parse(url).unwrap(),
-            ForkNetwork::Custom(url.to_owned())
+            ForkNetwork::Custom(Url::parse(url).unwrap())
         );
     }
 
     #[test]
     fn rejects_invalid_non_url_custom_values() {
-        let error = ForkNetwork::parse("not-a-network").unwrap_err().to_string();
+        let error = ForkNetwork::parse("not-a-network").unwrap_err();
 
-        assert!(error.contains("expected mainnet, testnet, devnet"));
+        assert!(error.to_string().contains("invalid network value"));
+        assert!(format!("{error:?}").contains("expected mainnet, testnet, devnet"));
     }
 
     #[test]
     fn rejects_non_http_scheme_custom_values() {
-        let error = ForkNetwork::parse("ws://example.com/graphql")
-            .unwrap_err()
-            .to_string();
+        let error = ForkNetwork::parse("ws://example.com/graphql").unwrap_err();
 
-        assert!(error.contains("unsupported URL scheme 'ws'"));
+        assert!(error.to_string().contains("invalid network value"));
+        assert!(format!("{error:?}").contains("unsupported URL scheme 'ws'"));
     }
 }
