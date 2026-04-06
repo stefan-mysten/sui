@@ -158,11 +158,6 @@ impl FileSystemStore {
         &self.base_path
     }
 
-    /// Filesystem-specific latest-object helper.
-    pub fn get_object_latest(&self, _object_id: &ObjectID) -> Result<Option<(Object, u64)>, Error> {
-        todo!("filesystem latest-object lookup is not implemented in the skeleton")
-    }
-
     /// Filesystem-specific owner scan helper.
     pub fn get_objects_by_owner(&self, _owner: SuiAddress) -> Result<Vec<Object>, Error> {
         todo!("filesystem owner scan is not implemented in the skeleton")

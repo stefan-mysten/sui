@@ -6,9 +6,7 @@
 //! This layer owns fork-checkpoint-aware read semantics and the composition of local/cache stores
 //! with remote backing sources. The simulator-facing store delegates all historical reads here.
 
-use anyhow::Error;
 use forking_data_store::VersionQuery;
-use forking_data_store::stores::FileSystemStore;
 use forking_data_store::stores::ForkingStore;
 use sui_types::base_types::ObjectID;
 use sui_types::base_types::SequenceNumber;
@@ -60,18 +58,6 @@ pub trait ForkSource {
     fn get_latest_checkpoint(&self) -> Option<VerifiedCheckpoint>;
 }
 
-/// Latest-object lookup capability needed by the concrete filesystem-backed source.
-pub trait LatestObjectStore {
-    /// Return the latest locally available object and its actual version.
-    fn get_object_latest(&self, object_id: &ObjectID) -> Result<Option<(Object, u64)>, Error>;
-}
-
-impl LatestObjectStore for FileSystemStore {
-    fn get_object_latest(&self, object_id: &ObjectID) -> Result<Option<(Object, u64)>, Error> {
-        FileSystemStore::get_object_latest(self, object_id)
-    }
-}
-
 /// Historical source backed by the lower-level `forking-data-store` composition.
 pub struct ForkingDataSource<P, S> {
     forked_at_checkpoint: CheckpointSequenceNumber,
@@ -104,20 +90,6 @@ impl<P, S> ForkingDataSource<P, S> {
     /// Return a mutable reference to the wrapped lower-level store.
     pub fn store_mut(&mut self) -> &mut ForkingStore<P, S> {
         &mut self.store
-    }
-}
-
-impl<P, S> ForkingDataSource<P, S>
-where
-    P: LatestObjectStore,
-{
-    fn read_primary_latest_object(&self, object_id: &ObjectID) -> Option<Object> {
-        self.store
-            .primary()
-            .get_object_latest(object_id)
-            .ok()
-            .flatten()
-            .map(|(object, _actual_version)| object)
     }
 }
 
@@ -166,9 +138,7 @@ where
 
 impl<P, S> ForkSource for ForkingDataSource<P, S>
 where
-    P: LatestObjectStore
-        + forking_data_store::CheckpointStoreWriter
-        + forking_data_store::ObjectStoreWriter,
+    P: forking_data_store::CheckpointStoreWriter + forking_data_store::ObjectStoreWriter,
     S: forking_data_store::CheckpointStore + forking_data_store::ObjectStore,
 {
     fn forked_at_checkpoint(&self) -> CheckpointSequenceNumber {
@@ -176,11 +146,9 @@ where
     }
 
     fn get_object(&self, object_id: &ObjectID) -> Option<Object> {
-        self.read_primary_latest_object(object_id).or_else(|| {
-            self.read_object(forking_data_store::ObjectKey {
-                object_id: *object_id,
-                version_query: VersionQuery::AtCheckpoint(self.forked_at_checkpoint),
-            })
+        self.read_object(forking_data_store::ObjectKey {
+            object_id: *object_id,
+            version_query: VersionQuery::Latest,
         })
     }
 
@@ -271,8 +239,6 @@ mod tests {
 
     #[derive(Default)]
     struct MockStore {
-        latest_object_calls: Mutex<Vec<ObjectID>>,
-        latest_objects: BTreeMap<ObjectID, Option<(Object, u64)>>,
         checkpoint_calls: Mutex<Vec<CheckpointSequenceNumber>>,
         checkpoints: BTreeMap<CheckpointSequenceNumber, VerifiedCheckpoint>,
         latest_checkpoint_calls: Mutex<u64>,
@@ -287,8 +253,6 @@ mod tests {
             latest_checkpoint: Option<VerifiedCheckpoint>,
         ) -> Self {
             Self {
-                latest_object_calls: Mutex::new(vec![]),
-                latest_objects: BTreeMap::new(),
                 checkpoint_calls: Mutex::new(vec![]),
                 checkpoints: checkpoints.into_iter().collect(),
                 latest_checkpoint_calls: Mutex::new(0),
@@ -298,27 +262,10 @@ mod tests {
             }
         }
 
-        fn with_latest_objects(
-            objects: impl IntoIterator<Item = (ObjectID, Option<(Object, u64)>)>,
-        ) -> Self {
-            Self {
-                latest_object_calls: Mutex::new(vec![]),
-                latest_objects: objects.into_iter().collect(),
-                checkpoint_calls: Mutex::new(vec![]),
-                checkpoints: BTreeMap::new(),
-                latest_checkpoint_calls: Mutex::new(0),
-                latest_checkpoint: None,
-                object_calls: Mutex::new(vec![]),
-                objects: BTreeMap::new(),
-            }
-        }
-
         fn with_objects(
             objects: impl IntoIterator<Item = (ObjectKey, Option<(Object, u64)>)>,
         ) -> Self {
             Self {
-                latest_object_calls: Mutex::new(vec![]),
-                latest_objects: BTreeMap::new(),
                 checkpoint_calls: Mutex::new(vec![]),
                 checkpoints: BTreeMap::new(),
                 latest_checkpoint_calls: Mutex::new(0),
@@ -326,13 +273,6 @@ mod tests {
                 object_calls: Mutex::new(vec![]),
                 objects: objects.into_iter().collect(),
             }
-        }
-
-        fn latest_object_calls(&self) -> Vec<ObjectID> {
-            self.latest_object_calls
-                .lock()
-                .expect("latest-object-call mutex should not be poisoned")
-                .clone()
         }
 
         fn checkpoint_calls(&self) -> Vec<CheckpointSequenceNumber> {
@@ -354,16 +294,6 @@ mod tests {
                 .lock()
                 .expect("object-call mutex should not be poisoned")
                 .clone()
-        }
-    }
-
-    impl LatestObjectStore for MockStore {
-        fn get_object_latest(&self, object_id: &ObjectID) -> Result<Option<(Object, u64)>, Error> {
-            self.latest_object_calls
-                .lock()
-                .expect("latest-object-call mutex should not be poisoned")
-                .push(*object_id);
-            Ok(self.latest_objects.get(object_id).cloned().unwrap_or(None))
         }
     }
 
@@ -442,12 +372,16 @@ mod tests {
     }
 
     #[test]
-    fn get_object_prefers_primary_latest_without_secondary_lookup() {
+    fn get_object_prefers_primary_without_secondary_lookup() {
         let object = Object::immutable_with_id_for_testing(ObjectID::random());
+        let latest_key = ObjectKey {
+            object_id: object.id(),
+            version_query: VersionQuery::Latest,
+        };
         let source = ForkingDataSource::from_stores(
             42,
-            MockStore::with_latest_objects([(
-                object.id(),
+            MockStore::with_objects([(
+                latest_key.clone(),
                 Some((object.clone(), object.version().value())),
             )]),
             MockStore::default(),
@@ -457,23 +391,24 @@ mod tests {
 
         assert_eq!(fetched, Some(object.clone()));
         assert_eq!(
-            source.store().primary().latest_object_calls(),
-            vec![object.id()]
+            source.store().primary().object_calls(),
+            vec![vec![latest_key]],
         );
         assert!(source.store().secondary().object_calls().is_empty());
     }
 
     #[test]
-    fn get_object_falls_back_to_fork_checkpoint_after_primary_miss() {
+    fn get_object_falls_back_to_secondary_after_primary_miss() {
         let object = Object::immutable_with_id_for_testing(ObjectID::random());
+        let latest_key = ObjectKey {
+            object_id: object.id(),
+            version_query: VersionQuery::Latest,
+        };
         let source = ForkingDataSource::from_stores(
             42,
             MockStore::default(),
             MockStore::with_objects([(
-                ObjectKey {
-                    object_id: object.id(),
-                    version_query: VersionQuery::AtCheckpoint(42),
-                },
+                latest_key.clone(),
                 Some((object.clone(), object.version().value())),
             )]),
         );
@@ -482,15 +417,12 @@ mod tests {
 
         assert_eq!(fetched, Some(object.clone()));
         assert_eq!(
-            source.store().primary().latest_object_calls(),
-            vec![object.id()]
+            source.store().primary().object_calls(),
+            vec![vec![latest_key.clone()]],
         );
         assert_eq!(
             source.store().secondary().object_calls(),
-            vec![vec![ObjectKey {
-                object_id: object.id(),
-                version_query: VersionQuery::AtCheckpoint(42),
-            }]],
+            vec![vec![latest_key]],
         );
     }
 

@@ -126,11 +126,13 @@ pub struct ObjectKey {
 }
 
 /// Query options for an object.
-/// `Version` request an object at a specific version, or latest if no version is provided
-/// `RootVersion` request an object at a given version at most (<=)
+/// `Latest` request the latest available version of the object.
+/// `Version` request an object at a specific version.
+/// `RootVersion` request an object at a given version at most (<=).
 /// `AtCheckpoint` request an object at a given checkpoint. Useful for unknown `Version`.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum VersionQuery {
+    Latest,
     Version(u64),
     RootVersion(u64),
     AtCheckpoint(u64),

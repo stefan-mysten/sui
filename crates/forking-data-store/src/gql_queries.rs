@@ -324,6 +324,8 @@ pub(crate) mod object_query {
                     _ => None,
                 },
             }
+            // NOTE: `VersionQuery::Latest` maps to all-None, which the GraphQL
+            // schema interprets as "return the latest version".
         }
     }
 
