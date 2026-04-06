@@ -58,8 +58,8 @@ impl FromStr for ForkNetwork {
 
 /// Parse and validate a custom GraphQL endpoint URL.
 fn parse_custom_url(value: &str) -> anyhow::Result<Url> {
-    let parsed = Url::parse(value)
-        .context("expected mainnet, testnet, devnet, or a full http(s) URL")?;
+    let parsed =
+        Url::parse(value).context("expected mainnet, testnet, devnet, or a full http(s) URL")?;
 
     match parsed.scheme() {
         "http" | "https" => {}
