@@ -252,12 +252,11 @@ mod tests {
 
     use sui_types::base_types::ObjectID;
     use sui_types::base_types::SuiAddress;
-    use sui_types::message_envelope::Envelope;
     use sui_types::object::Object;
     use sui_types::object::Owner;
-    use sui_types::test_checkpoint_data_builder::TestCheckpointBuilder;
 
     use super::*;
+    use crate::test_utils::verified_checkpoint;
 
     #[derive(Default)]
     struct MockForkSource {
@@ -375,15 +374,6 @@ mod tests {
                 .expect("latest-checkpoint-call mutex should not be poisoned") += 1;
             self.latest_checkpoint.clone()
         }
-    }
-
-    fn verified_checkpoint(sequence_number: CheckpointSequenceNumber) -> VerifiedCheckpoint {
-        let mut builder = TestCheckpointBuilder::new(sequence_number);
-        let checkpoint = builder.build_checkpoint();
-        VerifiedCheckpoint::new_unchecked(Envelope::new_from_data_and_sig(
-            checkpoint.summary.data().clone(),
-            checkpoint.summary.auth_sig().clone(),
-        ))
     }
 
     #[test]
