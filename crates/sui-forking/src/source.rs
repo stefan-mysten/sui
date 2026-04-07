@@ -10,7 +10,6 @@ use forking_data_store::VersionQuery;
 use forking_data_store::stores::ForkingStore;
 use sui_types::base_types::ObjectID;
 use sui_types::base_types::SequenceNumber;
-use sui_types::base_types::VersionNumber;
 use sui_types::committee::EpochId;
 use sui_types::error::SuiErrorKind;
 use sui_types::error::SuiResult;
@@ -28,8 +27,11 @@ pub trait ForkSource {
     fn get_object(&self, object_id: &ObjectID) -> Option<Object>;
 
     /// Return the object at an exact version.
-    fn get_object_at_version(&self, object_id: &ObjectID, version: VersionNumber)
-    -> Option<Object>;
+    fn get_object_at_version(
+        &self,
+        object_id: &ObjectID,
+        version: SequenceNumber,
+    ) -> Option<Object>;
 
     /// Resolve a child object under a parent with an upper version bound.
     fn read_child_object(
@@ -98,12 +100,45 @@ where
     P: forking_data_store::ObjectStoreWriter,
     S: forking_data_store::ObjectStore,
 {
+    /// Read an object through the `ForkingStore` cascade (same key for primary and secondary).
     fn read_object(&self, key: forking_data_store::ObjectKey) -> Option<Object> {
         forking_data_store::ObjectStore::get_objects(&self.store, &[key])
             .ok()
             .and_then(|mut objects| objects.pop())
             .flatten()
             .map(|(object, _actual_version)| object)
+    }
+
+    /// Read the latest local object, falling back to the state at the fork checkpoint on the
+    /// secondary. Unlike `read_object`, this uses different version queries for primary vs
+    /// secondary: `Latest` on disk, `AtCheckpoint(forked_at)` on the remote.
+    fn read_latest_object(&self, object_id: &ObjectID) -> Option<Object> {
+        let primary_result = forking_data_store::ObjectStore::get_objects(
+            self.store.primary(),
+            &[forking_data_store::ObjectKey {
+                object_id: *object_id,
+                version_query: VersionQuery::Latest,
+            }],
+        )
+        .ok()
+        .and_then(|mut objects| objects.pop())
+        .flatten();
+
+        if let Some((object, _)) = primary_result {
+            return Some(object);
+        }
+
+        forking_data_store::ObjectStore::get_objects(
+            self.store.secondary(),
+            &[forking_data_store::ObjectKey {
+                object_id: *object_id,
+                version_query: VersionQuery::AtCheckpoint(self.forked_at_checkpoint),
+            }],
+        )
+        .ok()
+        .and_then(|mut objects| objects.pop())
+        .flatten()
+        .map(|(object, _)| object)
     }
 }
 
@@ -128,11 +163,6 @@ where
         forking_data_store::CheckpointStore::get_latest_checkpoint(self.store.primary())
             .ok()
             .flatten()
-            .or_else(|| {
-                forking_data_store::CheckpointStore::get_latest_checkpoint(self.store.secondary())
-                    .ok()
-                    .flatten()
-            })
     }
 }
 
@@ -146,16 +176,13 @@ where
     }
 
     fn get_object(&self, object_id: &ObjectID) -> Option<Object> {
-        self.read_object(forking_data_store::ObjectKey {
-            object_id: *object_id,
-            version_query: VersionQuery::Latest,
-        })
+        self.read_latest_object(object_id)
     }
 
     fn get_object_at_version(
         &self,
         object_id: &ObjectID,
-        version: VersionNumber,
+        version: SequenceNumber,
     ) -> Option<Object> {
         self.read_object(forking_data_store::ObjectKey {
             object_id: *object_id,
@@ -362,7 +389,7 @@ mod tests {
     }
 
     #[test]
-    fn get_object_prefers_primary_without_secondary_lookup() {
+    fn get_object_prefers_primary_latest_without_secondary_lookup() {
         let object = Object::immutable_with_id_for_testing(ObjectID::random());
         let latest_key = ObjectKey {
             object_id: object.id(),
@@ -388,17 +415,16 @@ mod tests {
     }
 
     #[test]
-    fn get_object_falls_back_to_secondary_after_primary_miss() {
+    fn get_object_falls_back_to_secondary_at_fork_checkpoint() {
         let object = Object::immutable_with_id_for_testing(ObjectID::random());
-        let latest_key = ObjectKey {
-            object_id: object.id(),
-            version_query: VersionQuery::Latest,
-        };
         let source = ForkingDataSource::from_stores(
             42,
             MockStore::default(),
             MockStore::with_objects([(
-                latest_key.clone(),
+                ObjectKey {
+                    object_id: object.id(),
+                    version_query: VersionQuery::AtCheckpoint(42),
+                },
                 Some((object.clone(), object.version().value())),
             )]),
         );
@@ -406,13 +432,21 @@ mod tests {
         let fetched = source.get_object(&object.id());
 
         assert_eq!(fetched, Some(object.clone()));
+        // Primary was queried with Latest
         assert_eq!(
             source.store().primary().object_calls(),
-            vec![vec![latest_key.clone()]],
+            vec![vec![ObjectKey {
+                object_id: object.id(),
+                version_query: VersionQuery::Latest,
+            }]],
         );
+        // Secondary was queried with AtCheckpoint(forked_at)
         assert_eq!(
             source.store().secondary().object_calls(),
-            vec![vec![latest_key]],
+            vec![vec![ObjectKey {
+                object_id: object.id(),
+                version_query: VersionQuery::AtCheckpoint(42),
+            }]],
         );
     }
 
@@ -548,7 +582,7 @@ mod tests {
     }
 
     #[test]
-    fn get_highest_checkpoint_prefers_primary_latest_checkpoint() {
+    fn get_latest_checkpoint_returns_primary_only() {
         let primary_checkpoint = verified_checkpoint(17);
         let source = ForkingDataSource::from_stores(
             42,
@@ -564,30 +598,22 @@ mod tests {
                 .map(|checkpoint| *checkpoint.sequence_number()),
             Some(17)
         );
-        assert_eq!(*primary_checkpoint.sequence_number(), 17);
         assert_eq!(source.store().primary().latest_checkpoint_calls(), 1);
         assert_eq!(source.store().secondary().latest_checkpoint_calls(), 0);
     }
 
     #[test]
-    fn get_highest_checkpoint_falls_back_to_secondary_when_primary_is_empty() {
-        let checkpoint = verified_checkpoint(17);
+    fn get_latest_checkpoint_returns_none_when_primary_is_empty() {
         let source = ForkingDataSource::from_stores(
             42,
             MockStore::default(),
-            MockStore::with_checkpoints([], Some(checkpoint.clone())),
+            MockStore::with_checkpoints([], Some(verified_checkpoint(29))),
         );
 
         let fetched = source.get_latest_checkpoint();
 
-        assert_eq!(
-            fetched
-                .as_ref()
-                .map(|checkpoint| *checkpoint.sequence_number()),
-            Some(17)
-        );
-        assert_eq!(*checkpoint.sequence_number(), 17);
+        assert!(fetched.is_none());
         assert_eq!(source.store().primary().latest_checkpoint_calls(), 1);
-        assert_eq!(source.store().secondary().latest_checkpoint_calls(), 1);
+        assert_eq!(source.store().secondary().latest_checkpoint_calls(), 0);
     }
 }

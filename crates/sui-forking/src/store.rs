@@ -9,12 +9,10 @@
 use std::collections::BTreeMap;
 
 use simulacrum::SimulatorStore;
-use sui_types::SUI_CLOCK_OBJECT_ID;
 use sui_types::base_types::ObjectID;
 use sui_types::base_types::ObjectRef;
 use sui_types::base_types::SequenceNumber;
 use sui_types::base_types::SuiAddress;
-use sui_types::base_types::VersionNumber;
 use sui_types::clock::Clock;
 use sui_types::committee::Committee;
 use sui_types::committee::EpochId;
@@ -37,7 +35,6 @@ use sui_types::storage::PackageObject;
 use sui_types::storage::ParentSync;
 use sui_types::storage::load_package_object_from_object_store;
 use sui_types::sui_system_state::SuiSystemState;
-use sui_types::sui_system_state::get_sui_system_state;
 use sui_types::transaction::VerifiedTransaction;
 
 use crate::source::ForkSource;
@@ -91,7 +88,7 @@ where
         self.source.get_object(object_id)
     }
 
-    fn get_object_by_key(&self, object_id: &ObjectID, version: VersionNumber) -> Option<Object> {
+    fn get_object_by_key(&self, object_id: &ObjectID, version: SequenceNumber) -> Option<Object> {
         self.source.get_object_at_version(object_id, version)
     }
 }
@@ -176,22 +173,19 @@ where
     }
 
     fn get_object(&self, id: &ObjectID) -> Option<Object> {
-        ObjectStore::get_object(self, id)
+        self.source.get_object(id)
     }
 
     fn get_object_at_version(&self, id: &ObjectID, version: SequenceNumber) -> Option<Object> {
-        ObjectStore::get_object_by_key(self, id, version)
+        self.source.get_object_at_version(id, version)
     }
 
     fn get_system_state(&self) -> SuiSystemState {
-        get_sui_system_state(self).expect("system state should exist")
+        todo!("system state not implemented")
     }
 
     fn get_clock(&self) -> Clock {
-        ObjectStore::get_object(self, &SUI_CLOCK_OBJECT_ID)
-            .expect("clock should exist")
-            .to_rust()
-            .expect("clock object should deserialize")
+        todo!("clock not implemented")
     }
 
     fn owned_objects(&self, _owner: SuiAddress) -> Box<dyn Iterator<Item = Object> + '_> {
@@ -263,8 +257,8 @@ mod tests {
         forked_at_checkpoint: CheckpointSequenceNumber,
         object_calls: Mutex<Vec<ObjectID>>,
         objects: BTreeMap<ObjectID, Option<Object>>,
-        versioned_object_calls: Mutex<Vec<(ObjectID, VersionNumber)>>,
-        versioned_objects: BTreeMap<(ObjectID, VersionNumber), Option<Object>>,
+        versioned_object_calls: Mutex<Vec<(ObjectID, SequenceNumber)>>,
+        versioned_objects: BTreeMap<(ObjectID, SequenceNumber), Option<Object>>,
         child_object_calls: Mutex<Vec<(ObjectID, ObjectID, SequenceNumber)>>,
         child_objects: BTreeMap<(ObjectID, ObjectID, SequenceNumber), SuiResult<Option<Object>>>,
         received_object_calls: Mutex<Vec<(ObjectID, ObjectID, SequenceNumber, EpochId)>>,
@@ -301,7 +295,7 @@ mod tests {
         fn get_object_at_version(
             &self,
             object_id: &ObjectID,
-            version: VersionNumber,
+            version: SequenceNumber,
         ) -> Option<Object> {
             self.versioned_object_calls
                 .lock()
