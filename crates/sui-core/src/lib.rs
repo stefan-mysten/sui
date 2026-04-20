@@ -38,6 +38,7 @@ pub mod rpc_index;
 pub mod runtime;
 pub mod safe_client;
 pub mod signature_verifier;
+pub mod simulation;
 mod stake_aggregator;
 mod status_aggregator;
 pub mod storage;

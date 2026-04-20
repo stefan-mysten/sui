@@ -939,15 +939,58 @@ impl Simulacrum {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
     use std::time::Duration;
 
+    use move_core_types::identifier::Identifier;
     use rand::{SeedableRng, rngs::StdRng};
     use sui_types::{
-        base_types::SuiAddress, effects::TransactionEffectsAPI, gas_coin::GasCoin,
-        transaction::TransactionDataAPI,
+        SUI_ACCUMULATOR_ROOT_OBJECT_ID, SUI_FRAMEWORK_PACKAGE_ID,
+        accumulator_root::AccumulatorValue,
+        balance::Balance,
+        base_types::SuiAddress,
+        coin_reservation::ParsedObjectRefWithdrawal,
+        effects::TransactionEffectsAPI,
+        error::{SuiErrorKind, UserInputError},
+        gas_coin::{GAS, GasCoin},
+        object::Object,
+        transaction::{FundsWithdrawalArg, ObjectArg, TransactionDataAPI},
     };
 
     use super::*;
+
+    fn enable_simulation_protocols(sim: &mut Simulacrum) {
+        let mut protocol_config = sim.protocol_config().clone();
+        protocol_config.create_root_accumulator_object_for_testing();
+        protocol_config.enable_address_balance_gas_payments_for_testing();
+        protocol_config.enable_coin_reservation_for_testing();
+        let chain_identifier = (*sim
+            .store()
+            .get_checkpoint_by_sequence_number(0)
+            .unwrap()
+            .digest())
+        .into();
+        sim.epoch_state = EpochState::new_with_protocol_config(
+            sim.system_state(),
+            protocol_config,
+            chain_identifier,
+        );
+        assert!(
+            store::SimulatorStore::get_object(sim.store(), &SUI_ACCUMULATOR_ROOT_OBJECT_ID)
+                .is_some(),
+            "accumulator root object must exist in the default genesis for simulation tests",
+        );
+    }
+
+    fn insert_account_balance(sim: &mut Simulacrum, owner: SuiAddress, amount: u64) -> Object {
+        let account_object =
+            AccumulatorValue::create_for_testing(owner, Balance::type_tag(GAS::type_tag()), amount);
+        sim.store_mut().update_objects(
+            BTreeMap::from([(account_object.id(), account_object.clone())]),
+            vec![],
+        );
+        account_object
+    }
 
     #[test]
     fn deterministic_genesis() {
@@ -1052,5 +1095,135 @@ mod tests {
         } else {
             assert_eq!(checkpoint.network_total_transactions, 2); // genesis + 1 user txn
         };
+    }
+
+    #[test]
+    fn simulate_transaction_accepts_coin_reservation_input() {
+        let mut sim = Simulacrum::new();
+        enable_simulation_protocols(&mut sim);
+
+        let sender = *sim.keystore().accounts().next().unwrap().0;
+        let gas_ref = sim
+            .store()
+            .owned_objects(sender)
+            .find(|object| object.is_gas_coin())
+            .unwrap()
+            .compute_object_reference();
+        let account_object = insert_account_balance(&mut sim, sender, 1_000);
+        let reservation_ref =
+            ParsedObjectRefWithdrawal::new(account_object.id(), sim.epoch_state.epoch(), 1_000)
+                .encode(account_object.version(), sim.epoch_state.chain_identifier());
+        let recipient = SuiAddress::random_for_testing_only();
+
+        let kind = {
+            let mut builder = ProgrammableTransactionBuilder::new();
+            let withdrawal = builder
+                .obj(ObjectArg::ImmOrOwnedObject(reservation_ref))
+                .unwrap();
+            let recipient = builder.pure(recipient).unwrap();
+            builder.programmable_move_call(
+                SUI_FRAMEWORK_PACKAGE_ID,
+                Identifier::new("coin").unwrap(),
+                Identifier::new("send_funds").unwrap(),
+                vec![GAS::type_tag()],
+                vec![withdrawal, recipient],
+            );
+            TransactionKind::ProgrammableTransaction(builder.finish())
+        };
+
+        let tx = TransactionData::new_with_gas_data(
+            kind,
+            sender,
+            GasData {
+                payment: vec![gas_ref],
+                owner: sender,
+                price: sim.reference_gas_price(),
+                budget: 50_000_000,
+            },
+        );
+
+        let result = sim
+            .epoch_state
+            .simulate_transaction(
+                sim.store(),
+                &sim.deny_config,
+                &sim.verifier_signing_config,
+                tx,
+                TransactionChecks::Enabled,
+                false,
+            )
+            .unwrap();
+
+        assert!(
+            result.effects.status().is_ok(),
+            "{:?}",
+            result.effects.status()
+        );
+    }
+
+    #[test]
+    fn simulate_transaction_rejects_insufficient_declared_withdrawal() {
+        let mut sim = Simulacrum::new();
+        enable_simulation_protocols(&mut sim);
+
+        let sender = *sim.keystore().accounts().next().unwrap().0;
+        let gas_ref = sim
+            .store()
+            .owned_objects(sender)
+            .find(|object| object.is_gas_coin())
+            .unwrap()
+            .compute_object_reference();
+        insert_account_balance(&mut sim, sender, 10);
+        let recipient = SuiAddress::random_for_testing_only();
+
+        let kind = {
+            let mut builder = ProgrammableTransactionBuilder::new();
+            let withdrawal = builder
+                .funds_withdrawal(FundsWithdrawalArg::balance_from_sender(
+                    100,
+                    GAS::type_tag(),
+                ))
+                .unwrap();
+            let recipient = builder.pure(recipient).unwrap();
+            builder.programmable_move_call(
+                SUI_FRAMEWORK_PACKAGE_ID,
+                Identifier::new("coin").unwrap(),
+                Identifier::new("send_funds").unwrap(),
+                vec![GAS::type_tag()],
+                vec![withdrawal, recipient],
+            );
+            TransactionKind::ProgrammableTransaction(builder.finish())
+        };
+
+        let tx = TransactionData::new_with_gas_data(
+            kind,
+            sender,
+            GasData {
+                payment: vec![gas_ref],
+                owner: sender,
+                price: sim.reference_gas_price(),
+                budget: 50_000_000,
+            },
+        );
+
+        let err = match sim.epoch_state.simulate_transaction(
+            sim.store(),
+            &sim.deny_config,
+            &sim.verifier_signing_config,
+            tx,
+            TransactionChecks::Enabled,
+            false,
+        ) {
+            Ok(_) => panic!("expected insufficient declared withdrawal to fail"),
+            Err(err) => err,
+        };
+
+        assert!(matches!(
+            err.as_inner(),
+            SuiErrorKind::UserInputError {
+                error: UserInputError::InvalidWithdrawReservation { .. },
+            }
+        ));
+        assert!(err.to_string().contains("less than requested"), "{err:?}");
     }
 }
