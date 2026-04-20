@@ -9,20 +9,24 @@ use super::*;
 use crate::authority::authority_test_utils::{
     init_state_validator_with_fullnode, submit_and_execute,
 };
+use crate::authority::test_authority_builder::TestAuthorityBuilder;
 use move_core_types::identifier::Identifier;
 use move_core_types::language_storage::{StructTag, TypeTag};
 use sui_json_rpc_types::SuiTransactionBlockEffectsAPI;
 use sui_protocol_config::ProtocolConfig;
+use sui_types::accumulator_root::AccumulatorValue;
+use sui_types::balance::Balance;
 use sui_types::base_types::FullObjectRef;
+use sui_types::coin_reservation::ParsedObjectRefWithdrawal;
 use sui_types::collection_types::Table as TableType;
-use sui_types::crypto::{AccountKeyPair, get_key_pair};
+use sui_types::crypto::{AccountKeyPair, get_authority_key_pair, get_key_pair};
 use sui_types::effects::TransactionEffectsAPI;
 use sui_types::error::{SuiError, SuiErrorKind, UserInputError};
 use sui_types::gas::GasCostSummary;
-use sui_types::gas_coin::GasCoin;
-use sui_types::object::{GAS_VALUE_FOR_TESTING, MoveObject, OBJECT_START_VERSION};
+use sui_types::gas_coin::{GAS, GasCoin};
+use sui_types::object::{GAS_VALUE_FOR_TESTING, MoveObject, OBJECT_START_VERSION, Object};
 use sui_types::programmable_transaction_builder::ProgrammableTransactionBuilder;
-use sui_types::transaction::Command;
+use sui_types::transaction::{Command, TransactionData, TransactionKind};
 use sui_types::transaction_executor::TransactionChecks;
 use sui_types::utils::to_sender_signed_transaction;
 use sui_types::{SUI_FRAMEWORK_ADDRESS, SUI_FRAMEWORK_PACKAGE_ID};
@@ -342,6 +346,72 @@ fn assert_ok(results: &[EntryPointResult], entry_point: NodeEntryPoint) {
 // =============================================================================
 // Tests
 // =============================================================================
+
+#[tokio::test]
+async fn simulate_transaction_accepts_coin_reservation_input() {
+    let (sender, _sender_key): (_, AccountKeyPair) = get_key_pair();
+    let gas_object = Object::with_owner_for_testing(sender);
+    let gas_object_ref = gas_object.compute_object_reference();
+    let account_object =
+        AccumulatorValue::create_for_testing(sender, Balance::type_tag(GAS::type_tag()), 1_000);
+
+    let mut protocol_config = ProtocolConfig::get_for_max_version_UNSAFE();
+    protocol_config.create_root_accumulator_object_for_testing();
+    protocol_config.enable_address_balance_gas_payments_for_testing();
+    protocol_config.enable_coin_reservation_for_testing();
+
+    let fullnode_key_pair = get_authority_key_pair().1;
+    let fullnode = TestAuthorityBuilder::new()
+        .with_keypair(&fullnode_key_pair)
+        .with_protocol_config(protocol_config)
+        .with_starting_objects(&[gas_object, account_object.clone()])
+        .build()
+        .await;
+
+    let recipient = SuiAddress::random_for_testing_only();
+    let reservation_ref = ParsedObjectRefWithdrawal::new(
+        account_object.id(),
+        fullnode.epoch_store_for_testing().epoch(),
+        1_000,
+    )
+    .encode(account_object.version(), fullnode.get_chain_identifier());
+
+    let kind = {
+        let mut builder = ProgrammableTransactionBuilder::new();
+        let withdrawal = builder
+            .obj(sui_types::transaction::ObjectArg::ImmOrOwnedObject(
+                reservation_ref,
+            ))
+            .unwrap();
+        let recipient = builder.pure(recipient).unwrap();
+        builder.programmable_move_call(
+            SUI_FRAMEWORK_PACKAGE_ID,
+            Identifier::new("coin").unwrap(),
+            Identifier::new("send_funds").unwrap(),
+            vec![GAS::type_tag()],
+            vec![withdrawal, recipient],
+        );
+        TransactionKind::ProgrammableTransaction(builder.finish())
+    };
+
+    let tx = TransactionData::new(
+        kind,
+        sender,
+        gas_object_ref,
+        TEST_GAS_BUDGET,
+        fullnode.reference_gas_price_for_testing().unwrap(),
+    );
+
+    let result = fullnode
+        .simulate_transaction(tx, TransactionChecks::Enabled, false)
+        .unwrap();
+
+    assert!(
+        result.effects.status().is_ok(),
+        "{:?}",
+        result.effects.status()
+    );
+}
 
 #[tokio::test]
 async fn test_simple_transfer_gas_all_paths() {
