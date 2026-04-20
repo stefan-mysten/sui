@@ -1,6 +1,7 @@
 // Copyright (c) Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
+use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -22,6 +23,7 @@ use sui_types::{
     inner_temporary_store::InnerTemporaryStore,
     metrics::{BytecodeVerifierMetrics, ExecutionMetrics},
     object::{MoveObject, OBJECT_START_VERSION, Object, Owner},
+    storage::{ObjectKey, TrackingBackingStore},
     sui_system_state::{
         SuiSystemState, SuiSystemStateTrait,
         epoch_start_sui_system_state::{EpochStartSystemState, EpochStartSystemStateTrait},
@@ -278,9 +280,10 @@ impl EpochState {
 
         let (kind, signer, gas_data) = transaction.execution_parts();
         let execution_params = early_execution_error(&tx_digest, &checked_input_objects);
+        let tracking_store = TrackingBackingStore::new(store.backing_store());
         let (inner_temp_store, _, effects, execution_result) =
             self.executor.dev_inspect_transaction(
-                store.backing_store(),
+                &tracking_store,
                 &self.protocol_config,
                 self.execution_metrics.clone(),
                 false,
@@ -296,12 +299,11 @@ impl EpochState {
                 tx_digest,
                 dev_inspect,
             );
-
-        // Simulacrum doesn't track runtime-loaded objects; `object_set` is built from the
-        // transaction's input and written objects only, and `unchanged_loaded_runtime_objects`
-        // is always empty (matching `ReadStore::get_unchanged_loaded_runtime_objects`).
+        let loaded_runtime_objects = tracking_store.into_read_objects();
+        let unchanged_loaded_runtime_objects =
+            unchanged_loaded_runtime_objects(&effects, &loaded_runtime_objects);
         let objects = {
-            let mut objects = ObjectSet::default();
+            let mut objects = loaded_runtime_objects;
             for o in inner_temp_store
                 .input_objects
                 .values()
@@ -311,7 +313,11 @@ impl EpochState {
             }
 
             let object_keys =
-                sui_types::storage::get_transaction_object_set(&transaction, &effects, &[]);
+                sui_types::storage::get_transaction_object_set(
+                    &transaction,
+                    &effects,
+                    &unchanged_loaded_runtime_objects,
+                );
 
             let mut set = ObjectSet::default();
             for k in object_keys {
@@ -328,8 +334,28 @@ impl EpochState {
             effects,
             execution_result,
             mock_gas_id,
-            unchanged_loaded_runtime_objects: vec![],
+            unchanged_loaded_runtime_objects,
             suggested_gas_price: None,
         })
     }
+}
+
+fn unchanged_loaded_runtime_objects(
+    effects: &TransactionEffects,
+    loaded_runtime_objects: &ObjectSet,
+) -> Vec<ObjectKey> {
+    let mut unchanged_loaded_runtime_objects: BTreeMap<_, _> = loaded_runtime_objects
+        .iter()
+        .filter(|o| !o.is_package())
+        .map(|o| (o.id(), o.version()))
+        .collect();
+
+    for change in effects.object_changes() {
+        unchanged_loaded_runtime_objects.remove(&change.id);
+    }
+
+    unchanged_loaded_runtime_objects
+        .into_iter()
+        .map(|(id, version)| ObjectKey(id, version))
+        .collect()
 }
