@@ -60,6 +60,10 @@ use self::store::in_mem_store::KeyStore;
 use sui_core::mock_checkpoint_builder::{MockCheckpointBuilder, ValidatorKeypairProvider};
 use sui_types::messages_checkpoint::{CheckpointContents, CheckpointSequenceNumber};
 use sui_types::sui_system_state::SuiSystemState;
+use sui_types::transaction_driver_types::{
+    ExecuteTransactionRequestV3, ExecuteTransactionResponseV3, TransactionSubmissionError,
+};
+use sui_types::transaction_executor::SimulateTransactionResult;
 pub use sui_types::transaction_executor::TransactionChecks;
 use sui_types::{
     gas_coin::GasCoin,
@@ -868,6 +872,34 @@ impl<T, V: store::SimulatorStore> ReadStore for Simulacrum<T, V> {
     }
 }
 
+#[async_trait::async_trait]
+impl<R: Send + Sync, S: store::SimulatorStore + Send + Sync>
+    sui_types::transaction_executor::TransactionExecutor for Simulacrum<R, S>
+{
+    async fn execute_transaction(
+        &self,
+        _request: ExecuteTransactionRequestV3,
+        _client_addr: Option<std::net::SocketAddr>,
+    ) -> Result<ExecuteTransactionResponseV3, TransactionSubmissionError> {
+        todo!()
+    }
+
+    fn simulate_transaction(
+        &self,
+        transaction: TransactionData,
+        checks: TransactionChecks,
+        allow_mock_gas_coin: bool,
+    ) -> Result<SimulateTransactionResult, sui_types::error::SuiError> {
+        self.epoch_state.simulate_transaction(
+            &self.store,
+            &self.verifier_signing_config,
+            transaction,
+            checks,
+            allow_mock_gas_coin,
+        )
+    }
+}
+
 impl<T: Send + Sync, V: store::SimulatorStore + Send + Sync> RpcStateReader for Simulacrum<T, V> {
     fn get_lowest_available_checkpoint_objects(
         &self,
@@ -941,10 +973,17 @@ impl Simulacrum {
 mod tests {
     use std::time::Duration;
 
+    use move_core_types::identifier::Identifier;
     use rand::{SeedableRng, rngs::StdRng};
+    use sui_config::verifier_signing_config::VerifierSigningConfig;
     use sui_types::{
-        base_types::SuiAddress, effects::TransactionEffectsAPI, gas_coin::GasCoin,
-        transaction::TransactionDataAPI,
+        SUI_FRAMEWORK_PACKAGE_ID,
+        base_types::{ObjectID, SuiAddress},
+        effects::TransactionEffectsAPI,
+        error::SuiErrorKind,
+        gas_coin::{GAS, GasCoin},
+        transaction::{GasData, ObjectArg, TransactionDataAPI, TransactionKind},
+        transaction_executor::SimulateTransactionResult,
     };
 
     use super::*;
@@ -1052,5 +1091,264 @@ mod tests {
         } else {
             assert_eq!(checkpoint.network_total_transactions, 2); // genesis + 1 user txn
         };
+    }
+
+    #[test]
+    fn gasless_simulation_does_not_inject_mock_gas() {
+        let sim = Simulacrum::new();
+        let sender = *sim.keystore().accounts().next().unwrap().0;
+
+        // Build an EpochState over Simulacrum's store with gasless enabled on the protocol
+        // config — the only tweak we need over what `Simulacrum::new()` already provides.
+        let mut protocol_config = sim.protocol_config().clone();
+        protocol_config.enable_gasless_for_testing();
+        protocol_config.set_gasless_allowed_token_types_for_testing(vec![(
+            GAS::type_tag().to_canonical_string(true),
+            0,
+        )]);
+        let chain_identifier = (*sim
+            .store()
+            .get_checkpoint_by_sequence_number(0)
+            .unwrap()
+            .digest())
+        .into();
+        let epoch_state = EpochState::new_with_protocol_config(
+            sim.system_state(),
+            protocol_config,
+            chain_identifier,
+        );
+
+        let gas_ref = sim
+            .store()
+            .owned_objects(sender)
+            .find(|object| object.is_gas_coin())
+            .unwrap()
+            .compute_object_reference();
+        let recipient = SuiAddress::random_for_testing_only();
+
+        let kind = {
+            let mut builder = ProgrammableTransactionBuilder::new();
+            let coin = builder.obj(ObjectArg::ImmOrOwnedObject(gas_ref)).unwrap();
+            let recipient = builder.pure(recipient).unwrap();
+            builder.programmable_move_call(
+                SUI_FRAMEWORK_PACKAGE_ID,
+                Identifier::new("coin").unwrap(),
+                Identifier::new("send_funds").unwrap(),
+                vec![GAS::type_tag()],
+                vec![coin, recipient],
+            );
+            TransactionKind::ProgrammableTransaction(builder.finish())
+        };
+
+        let tx = TransactionData::new_with_gas_data(
+            kind,
+            sender,
+            GasData {
+                payment: vec![],
+                owner: sender,
+                price: 0,
+                budget: 0,
+            },
+        );
+
+        let SimulateTransactionResult {
+            effects,
+            mock_gas_id,
+            ..
+        } = epoch_state
+            .simulate_transaction(
+                sim.store(),
+                &VerifierSigningConfig::default(),
+                tx,
+                TransactionChecks::Enabled,
+                true,
+            )
+            .unwrap();
+
+        assert!(
+            mock_gas_id.is_none(),
+            "gasless simulation should not synthesize a mock gas coin",
+        );
+        assert!(effects.status().is_ok(), "{:?}", effects.status());
+    }
+
+    #[test]
+    fn simulate_rejects_system_transaction() {
+        use sui_types::transaction::GenesisTransaction;
+
+        let sim = Simulacrum::new();
+        let kind = TransactionKind::Genesis(GenesisTransaction { objects: vec![] });
+        let sender = SuiAddress::default();
+        let tx = TransactionData::new_with_gas_data(
+            kind,
+            sender,
+            GasData {
+                payment: vec![],
+                owner: sender,
+                price: 0,
+                budget: 0,
+            },
+        );
+
+        let result = sim.epoch_state.simulate_transaction(
+            sim.store(),
+            &VerifierSigningConfig::default(),
+            tx,
+            TransactionChecks::Enabled,
+            false,
+        );
+
+        let err = match result {
+            Err(e) => e,
+            Ok(_) => panic!("expected simulate_transaction to reject system transaction"),
+        };
+        assert!(
+            matches!(err.as_inner(), SuiErrorKind::UnsupportedFeatureError { .. }),
+            "expected UnsupportedFeatureError, got: {err:?}",
+        );
+    }
+
+    #[test]
+    fn simulate_with_mock_gas_coin() {
+        let sim = Simulacrum::new();
+        let sender = *sim.keystore().accounts().next().unwrap().0;
+        let recipient = SuiAddress::random_for_testing_only();
+
+        let pt = {
+            let mut builder = ProgrammableTransactionBuilder::new();
+            builder.transfer_sui(recipient, Some(1_000_000));
+            builder.finish()
+        };
+
+        let tx = TransactionData::new_with_gas_data(
+            TransactionKind::ProgrammableTransaction(pt),
+            sender,
+            GasData {
+                payment: vec![],
+                owner: sender,
+                price: sim.reference_gas_price(),
+                budget: 50_000_000,
+            },
+        );
+
+        let SimulateTransactionResult {
+            effects,
+            mock_gas_id,
+            ..
+        } = sim
+            .epoch_state
+            .simulate_transaction(
+                sim.store(),
+                &sim.verifier_signing_config,
+                tx,
+                TransactionChecks::Disabled,
+                true,
+            )
+            .unwrap();
+
+        assert_eq!(mock_gas_id, Some(ObjectID::MAX));
+        assert!(effects.status().is_ok(), "{:?}", effects.status());
+    }
+
+    #[test]
+    fn simulate_with_dev_inspect_checks_disabled() {
+        let sim = Simulacrum::new();
+        let sender = *sim.keystore().accounts().next().unwrap().0;
+
+        let gas_ref = sim
+            .store()
+            .owned_objects(sender)
+            .find(|object| object.is_gas_coin())
+            .unwrap()
+            .compute_object_reference();
+
+        let pt = {
+            let mut builder = ProgrammableTransactionBuilder::new();
+            builder.transfer_sui(sender, Some(100));
+            builder.finish()
+        };
+
+        let tx = TransactionData::new_with_gas_data(
+            TransactionKind::ProgrammableTransaction(pt),
+            sender,
+            GasData {
+                payment: vec![gas_ref],
+                owner: sender,
+                price: sim.reference_gas_price(),
+                budget: 50_000_000,
+            },
+        );
+
+        let SimulateTransactionResult {
+            effects,
+            mock_gas_id,
+            ..
+        } = sim
+            .epoch_state
+            .simulate_transaction(
+                sim.store(),
+                &sim.verifier_signing_config,
+                tx,
+                TransactionChecks::Disabled,
+                false,
+            )
+            .unwrap();
+
+        assert!(mock_gas_id.is_none());
+        assert!(effects.status().is_ok(), "{:?}", effects.status());
+    }
+
+    #[test]
+    fn simulate_with_full_checks() {
+        let sim = Simulacrum::new();
+        let sender = *sim.keystore().accounts().next().unwrap().0;
+        let recipient = SuiAddress::random_for_testing_only();
+
+        let gas_obj = sim
+            .store()
+            .owned_objects(sender)
+            .find(|object| object.is_gas_coin())
+            .unwrap();
+        let gas_ref = gas_obj.compute_object_reference();
+
+        let pt = {
+            let mut builder = ProgrammableTransactionBuilder::new();
+            builder.transfer_sui(recipient, Some(1_000));
+            builder.finish()
+        };
+
+        let tx = TransactionData::new_with_gas_data(
+            TransactionKind::ProgrammableTransaction(pt),
+            sender,
+            GasData {
+                payment: vec![gas_ref],
+                owner: sender,
+                price: sim.reference_gas_price(),
+                budget: 50_000_000,
+            },
+        );
+
+        let SimulateTransactionResult {
+            effects,
+            mock_gas_id,
+            objects,
+            ..
+        } = sim
+            .epoch_state
+            .simulate_transaction(
+                sim.store(),
+                &sim.verifier_signing_config,
+                tx,
+                TransactionChecks::Enabled,
+                false,
+            )
+            .unwrap();
+
+        assert!(mock_gas_id.is_none());
+        assert!(effects.status().is_ok(), "{:?}", effects.status());
+        assert!(
+            !objects.is_empty(),
+            "object set should contain affected objects"
+        );
     }
 }
