@@ -26,6 +26,7 @@ use sui_types::{
     inner_temporary_store::InnerTemporaryStore,
     metrics::{BytecodeVerifierMetrics, ExecutionMetrics},
     object::{MoveObject, OBJECT_START_VERSION, Object, Owner},
+    signature::GenericSignature,
     storage::{BackingPackageStore, BackingStore, TrackingBackingStore},
     transaction::{
         CheckedInputObjects, GasData, InputObjectKind, InputObjects, ObjectReadResult,
@@ -185,10 +186,15 @@ fn prepare_simulation<C: SimulationContext>(
     };
 
     let declared_withdrawals = pre_object_load_checks(
-        params,
         &transaction,
+        &[],
         &input_object_kinds,
         &receiving_object_refs,
+        params.transaction_deny_config,
+        params.package_store,
+        params.chain_identifier,
+        params.coin_reservation_resolver,
+        params.account_funds_read,
     )?;
     let address_funds = declared_withdrawals.keys().cloned().collect();
 
@@ -256,28 +262,36 @@ fn prepare_simulation<C: SimulationContext>(
     })
 }
 
-fn pre_object_load_checks(
-    params: &SimulationParams<'_>,
+/// Runs deny list checks and processes funds withdrawals. Called before loading
+/// input objects, since these checks don't depend on object state.
+///
+/// This is the single canonical implementation shared by both the fullnode
+/// simulation path and the `AuthorityState` signing path.
+pub fn pre_object_load_checks(
     transaction: &TransactionData,
+    tx_signatures: &[GenericSignature],
     input_object_kinds: &[InputObjectKind],
     receiving_object_refs: &[ObjectRef],
+    transaction_deny_config: &TransactionDenyConfig,
+    package_store: &dyn BackingPackageStore,
+    chain_identifier: ChainIdentifier,
+    coin_reservation_resolver: &dyn CoinReservationResolverTrait,
+    account_funds_read: &dyn AccountFundsRead,
 ) -> SuiResult<BTreeMap<AccumulatorObjId, (u64, TypeTag)>> {
     sui_transaction_checks::deny::check_transaction_for_signing(
         transaction,
-        &[],
+        tx_signatures,
         input_object_kinds,
         receiving_object_refs,
-        params.transaction_deny_config,
-        params.package_store,
+        transaction_deny_config,
+        package_store,
     )?;
 
     let declared_withdrawals = transaction.process_funds_withdrawals_for_signing(
-        params.chain_identifier,
-        params.coin_reservation_resolver,
+        chain_identifier,
+        coin_reservation_resolver,
     )?;
-    params
-        .account_funds_read
-        .check_amounts_available(&declared_withdrawals)?;
+    account_funds_read.check_amounts_available(&declared_withdrawals)?;
     Ok(declared_withdrawals)
 }
 

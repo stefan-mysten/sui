@@ -1026,8 +1026,6 @@ impl AuthorityState {
         self.checkpoint_store.get_epoch_state_commitments(epoch)
     }
 
-    /// Runs deny list checks and processes funds withdrawals. Called before loading input
-    /// objects, since these checks don't depend on object state.
     fn pre_object_load_checks(
         &self,
         tx_data: &TransactionData,
@@ -1036,19 +1034,13 @@ impl AuthorityState {
         receiving_objects_refs: &[ObjectRef],
         protocol_config: &ProtocolConfig,
     ) -> SuiResult<BTreeMap<AccumulatorObjId, (u64, TypeTag)>> {
-        // Note: the deny checks may do redundant package loads but:
-        // - they only load packages when there is an active package deny map
-        // - the loads are cached anyway
-        sui_transaction_checks::deny::check_transaction_for_signing(
+        crate::simulation::pre_object_load_checks(
             tx_data,
             tx_signatures,
             input_object_kinds,
             receiving_objects_refs,
             &self.config.transaction_deny_config,
             self.get_backing_package_store().as_ref(),
-        )?;
-
-        let declared_withdrawals = tx_data.process_funds_withdrawals_for_signing(
             self.chain_identifier,
             self.coin_reservation_resolver.as_ref(),
         )?;
