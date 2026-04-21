@@ -138,6 +138,8 @@ fn validate_simulation_request(
         .into());
     }
 
+    // Reject coin reservations in gas payment when the execution engine
+    // doesn't support them.
     if !params.protocol_config.enable_coin_reservation_obj_refs()
         && transaction
             .gas()
@@ -163,10 +165,16 @@ fn prepare_simulation<C: SimulationContext>(
 ) -> SuiResult<PreparedSimulation> {
     let dev_inspect = checks.disabled();
 
+    // Cheap validity checks for a transaction, including input size limits.
     transaction.validity_check_no_gas_check(params.protocol_config)?;
 
     let input_object_kinds = transaction.input_objects()?;
     let receiving_object_refs = transaction.receiving_objects();
+
+    // Create and inject mock gas coin before pre_object_load_checks so that
+    // funds withdrawal processing sees non-empty payment and doesn't incorrectly
+    // create an address balance withdrawal for gas.
+    // Skip mock gas for gasless transactions — they don't use gas coins.
     let is_gasless =
         params.protocol_config.enable_gasless() && transaction.is_gasless_transaction();
     let mock_gas_object = if allow_mock_gas_coin && transaction.gas().is_empty() && !is_gasless {
@@ -203,6 +211,7 @@ fn prepare_simulation<C: SimulationContext>(
     let (mut input_objects, receiving_objects) =
         ctx.read_inputs_for_simulation(&tx_digest, &input_object_kinds, &receiving_object_refs)?;
 
+    // Add mock gas to input objects after loading (it doesn't exist in the store).
     let mock_gas_id = mock_gas_object.map(|obj| {
         let id = obj.id();
         input_objects.push(ObjectReadResult::new_from_gas_object(&obj));
@@ -351,6 +360,7 @@ fn execute_prepared_simulation(
         dev_inspect,
     );
 
+    // Post-execution: check object funds (non-address withdrawals discovered during execution).
     let (inner_temp_store, effects, execution_result) = if execution_result.is_ok()
         && has_insufficient_object_funds(
             params.account_funds_read,

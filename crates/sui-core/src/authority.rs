@@ -978,6 +978,7 @@ impl SimulationContext for AuthoritySimulationContext<'_> {
         receiving_object_refs: &[ObjectRef],
     ) -> SuiResult<(InputObjects, ReceivingObjects)> {
         self.authority.input_loader.read_objects_for_signing(
+            // We don't want to cache this transaction since it's a simulation.
             None,
             input_object_kinds,
             receiving_object_refs,
