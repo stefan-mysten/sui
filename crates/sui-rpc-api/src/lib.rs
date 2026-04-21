@@ -142,8 +142,7 @@ impl RpcService {
         let metrics = self.metrics.clone();
         let extra_routes = std::mem::take(&mut self.extra_routes);
         let extra_service_names = std::mem::take(&mut self.extra_service_names);
-        let extra_file_descriptor_sets =
-            std::mem::take(&mut self.extra_file_descriptor_sets);
+        let extra_file_descriptor_sets = std::mem::take(&mut self.extra_file_descriptor_sets);
 
         let router = {
             let ledger_service =
