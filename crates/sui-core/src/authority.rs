@@ -1043,21 +1043,9 @@ impl AuthorityState {
             self.get_backing_package_store().as_ref(),
             self.chain_identifier,
             self.coin_reservation_resolver.as_ref(),
-        )?;
-
-        self.execution_cache_trait_pointers
-            .account_funds_read
-            .check_amounts_available(&declared_withdrawals)?;
-
-        if protocol_config.gasless_verify_remaining_balance() && tx_data.is_gasless_transaction() {
-            let min_amounts =
-                sui_types::transaction::get_gasless_allowed_token_types(protocol_config);
-            self.execution_cache_trait_pointers
-                .account_funds_read
-                .check_remaining_amounts_after_withdrawal(&declared_withdrawals, &min_amounts)?;
-        }
-
-        Ok(declared_withdrawals)
+            self.get_account_funds_read().as_ref(),
+            protocol_config,
+        )
     }
 
     fn handle_transaction_deny_checks(

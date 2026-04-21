@@ -195,6 +195,7 @@ fn prepare_simulation<C: SimulationContext>(
         params.chain_identifier,
         params.coin_reservation_resolver,
         params.account_funds_read,
+        params.protocol_config,
     )?;
     let address_funds = declared_withdrawals.keys().cloned().collect();
 
@@ -268,7 +269,7 @@ fn prepare_simulation<C: SimulationContext>(
 /// This is the single canonical implementation shared by both the fullnode
 /// simulation path and the `AuthorityState` signing path.
 pub fn pre_object_load_checks(
-    transaction: &TransactionData,
+    tx_data: &TransactionData,
     tx_signatures: &[GenericSignature],
     input_object_kinds: &[InputObjectKind],
     receiving_object_refs: &[ObjectRef],
@@ -277,9 +278,13 @@ pub fn pre_object_load_checks(
     chain_identifier: ChainIdentifier,
     coin_reservation_resolver: &dyn CoinReservationResolverTrait,
     account_funds_read: &dyn AccountFundsRead,
+    protocol_config: &sui_protocol_config::ProtocolConfig,
 ) -> SuiResult<BTreeMap<AccumulatorObjId, (u64, TypeTag)>> {
+    // Note: the deny checks may do redundant package loads but:
+    // - they only load packages when there is an active package deny map
+    // - the loads are cached anyway
     sui_transaction_checks::deny::check_transaction_for_signing(
-        transaction,
+        tx_data,
         tx_signatures,
         input_object_kinds,
         receiving_object_refs,
@@ -287,11 +292,16 @@ pub fn pre_object_load_checks(
         package_store,
     )?;
 
-    let declared_withdrawals = transaction.process_funds_withdrawals_for_signing(
-        chain_identifier,
-        coin_reservation_resolver,
-    )?;
+    let declared_withdrawals = tx_data
+        .process_funds_withdrawals_for_signing(chain_identifier, coin_reservation_resolver)?;
     account_funds_read.check_amounts_available(&declared_withdrawals)?;
+
+    if protocol_config.gasless_verify_remaining_balance() && tx_data.is_gasless_transaction() {
+        let min_amounts = sui_types::transaction::get_gasless_allowed_token_types(protocol_config);
+        account_funds_read
+            .check_remaining_amounts_after_withdrawal(&declared_withdrawals, &min_amounts)?;
+    }
+
     Ok(declared_withdrawals)
 }
 
