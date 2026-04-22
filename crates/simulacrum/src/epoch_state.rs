@@ -104,6 +104,14 @@ impl EpochState {
         self.chain_identifier
     }
 
+    pub fn execution_metrics(&self) -> Arc<ExecutionMetrics> {
+        self.execution_metrics.clone()
+    }
+
+    pub fn bytecode_verifier_metrics(&self) -> Arc<BytecodeVerifierMetrics> {
+        self.bytecode_verifier_metrics.clone()
+    }
+
     pub fn execute_transaction(
         &self,
         store: &dyn SimulatorStore,

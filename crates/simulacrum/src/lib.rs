@@ -10,6 +10,7 @@
 //!
 //! [`Simulacrum`]: crate::Simulacrum
 
+use std::collections::HashSet;
 use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -20,6 +21,8 @@ use prost::Message;
 use rand::rngs::OsRng;
 use sui_config::verifier_signing_config::VerifierSigningConfig;
 use sui_config::{genesis, transaction_deny_config::TransactionDenyConfig};
+use sui_core::accumulators::funds_read::AccountFundsRead;
+use sui_core::simulation::{SimulationContext, SimulationParams};
 use sui_framework_snapshot::load_bytecode_snapshot;
 use sui_protocol_config::{ProtocolConfig, ProtocolVersion};
 use sui_rpc::field::{FieldMask, FieldMaskUtil};
@@ -28,19 +31,26 @@ use sui_rpc::proto::sui::rpc;
 use sui_swarm_config::genesis_config::AccountConfig;
 use sui_swarm_config::network_config::NetworkConfig;
 use sui_swarm_config::network_config_builder::ConfigBuilder;
+use sui_types::accumulator_root::AccumulatorObjId;
 use sui_types::base_types::{AuthorityName, ObjectID, ObjectRef, SequenceNumber, VersionNumber};
+use sui_types::coin_reservation::{CoinReservationResolverTrait, ParsedObjectRefWithdrawal};
 use sui_types::crypto::{
     AccountKeyPair, AuthoritySignature, SuiKeyPair, get_account_key_pair, get_key_pair,
 };
-use sui_types::digests::{ChainIdentifier, ConsensusCommitDigest};
+use sui_types::digests::{ChainIdentifier, ConsensusCommitDigest, TransactionDigest};
 use sui_types::effects::TransactionEffectsAPI;
+use sui_types::error::{UserInputError, UserInputResult};
+use sui_types::transaction::FundsWithdrawalArg;
 use sui_types::messages_consensus::ConsensusDeterminedVersionAssignments;
 use sui_types::object::{Object, Owner};
 use sui_types::storage::ObjectKey;
 use sui_types::storage::{ChildObjectResolver, ObjectStore, ReadStore, RpcStateReader};
-use sui_types::sui_system_state::epoch_start_sui_system_state::EpochStartSystemState;
+use sui_types::sui_system_state::epoch_start_sui_system_state::{
+    EpochStartSystemState, EpochStartSystemStateTrait,
+};
 use sui_types::transaction::TransactionDataAPI;
-use sui_types::transaction::{EndOfEpochTransactionKind, SenderSignedData};
+use sui_types::transaction::{EndOfEpochTransactionKind, InputObjectKind, SenderSignedData};
+use sui_types::transaction_executor::SimulateTransactionResult;
 use sui_types::{
     base_types::{EpochId, SuiAddress},
     committee::Committee,
@@ -50,7 +60,7 @@ use sui_types::{
     inner_temporary_store::InnerTemporaryStore,
     messages_checkpoint::{EndOfEpochData, VerifiedCheckpoint},
     signature::VerifyParams,
-    transaction::{Transaction, VerifiedTransaction},
+    transaction::{InputObjects, ReceivingObjects, Transaction, VerifiedTransaction},
 };
 
 pub use self::epoch_state::EpochState;
@@ -94,6 +104,47 @@ pub struct AdvanceEpochConfig {
 
 mod epoch_state;
 pub mod store;
+
+struct SimulatorStoreContext<'a, S: SimulatorStore>(&'a S);
+
+impl<S: SimulatorStore> SimulationContext for SimulatorStoreContext<'_, S> {
+    fn read_inputs_for_simulation(
+        &self,
+        tx_digest: &TransactionDigest,
+        input_object_kinds: &[InputObjectKind],
+        receiving_object_refs: &[ObjectRef],
+    ) -> SuiResult<(InputObjects, ReceivingObjects)> {
+        self.0
+            .read_objects_for_synchronous_execution(tx_digest, input_object_kinds, receiving_object_refs)
+    }
+}
+
+struct NoopAccountFundsRead;
+
+impl AccountFundsRead for NoopAccountFundsRead {
+    fn get_latest_account_amount(&self, _: &AccumulatorObjId) -> (u128, SequenceNumber) {
+        (0, SequenceNumber::default())
+    }
+
+    fn get_account_amount_at_version(&self, _: &AccumulatorObjId, _: SequenceNumber) -> u128 {
+        0
+    }
+}
+
+struct NoopCoinReservationResolver;
+
+impl CoinReservationResolverTrait for NoopCoinReservationResolver {
+    fn resolve_funds_withdrawal(
+        &self,
+        _sender: SuiAddress,
+        _coin_reservation: ParsedObjectRefWithdrawal,
+        _accumulator_version: Option<SequenceNumber>,
+    ) -> UserInputResult<FundsWithdrawalArg> {
+        Err(UserInputError::Unsupported(
+            "coin reservations are not supported in simulacrum".to_string(),
+        ))
+    }
+}
 
 /// A `Simulacrum` of Sui.
 ///
@@ -243,6 +294,47 @@ impl<R, S: store::SimulatorStore> Simulacrum<R, S> {
 
     /// Execute a transaction while impersonating a specific sender.
     ///
+    /// Simulates the provided transaction without mutating any state.
+    pub fn simulate_transaction(
+        &self,
+        transaction: TransactionData,
+        checks: TransactionChecks,
+        allow_mock_gas_coin: bool,
+    ) -> SuiResult<SimulateTransactionResult> {
+        let certificate_deny_set = HashSet::new();
+        let noop_coin_resolver = NoopCoinReservationResolver;
+        let noop_funds = NoopAccountFundsRead;
+
+        let params = SimulationParams {
+            protocol_config: self.epoch_state.protocol_config(),
+            reference_gas_price: self.epoch_state.reference_gas_price(),
+            epoch_id: self.epoch_state.epoch(),
+            epoch_timestamp_ms: self
+                .epoch_state
+                .epoch_start_state()
+                .epoch_start_timestamp_ms(),
+            chain_identifier: self.epoch_state.chain_identifier(),
+            transaction_deny_config: &self.deny_config,
+            verifier_signing_config: &self.verifier_signing_config,
+            certificate_deny_set: &certificate_deny_set,
+            bytecode_verifier_metrics: self.epoch_state.bytecode_verifier_metrics(),
+            execution_metrics: self.epoch_state.execution_metrics(),
+            package_store: &self.store,
+            backing_store: self.store.backing_store(),
+            coin_reservation_resolver: &noop_coin_resolver,
+            account_funds_read: &noop_funds,
+        };
+
+        let ctx = SimulatorStoreContext(&self.store);
+        sui_core::simulation::simulate_transaction(
+            &params,
+            &ctx,
+            transaction,
+            checks,
+            allow_mock_gas_coin,
+        )
+    }
+
     /// This method allows executing transactions as any account without requiring the private
     /// keys for that account. This is useful for testing scenarios where you want to simulate
     /// transactions from accounts you don't control.
