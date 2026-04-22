@@ -13,7 +13,7 @@ use crate::authority::test_authority_builder::TestAuthorityBuilder;
 use move_core_types::identifier::Identifier;
 use move_core_types::language_storage::{StructTag, TypeTag};
 use sui_json_rpc_types::SuiTransactionBlockEffectsAPI;
-use sui_protocol_config::ProtocolConfig;
+use sui_protocol_config::{ProtocolConfig, ProtocolVersion};
 use sui_types::accumulator_root::AccumulatorValue;
 use sui_types::balance::Balance;
 use sui_types::base_types::FullObjectRef;
@@ -188,6 +188,22 @@ fn build_transfer(env: &TestEnv, budget: u64, gas_price: u64) -> TransactionData
     };
     let kind = TransactionKind::ProgrammableTransaction(pt);
     TransactionData::new(kind, env.sender, env.gas_object_ref, budget, gas_price)
+}
+
+fn build_change_epoch_system_transaction() -> TransactionData {
+    sui_types::transaction::VerifiedTransaction::new_change_epoch(
+        1,
+        ProtocolVersion::MIN,
+        0,
+        0,
+        0,
+        0,
+        0,
+        vec![],
+    )
+    .data()
+    .transaction_data()
+    .clone()
 }
 
 // =============================================================================
@@ -410,6 +426,78 @@ async fn simulate_transaction_accepts_coin_reservation_input() {
         result.effects.status().is_ok(),
         "{:?}",
         result.effects.status()
+    );
+}
+
+#[tokio::test]
+async fn simulate_transaction_rejects_system_tx_before_fullnode_guard() {
+    let (validator, _fullnode) = init_state_validator_with_fullnode().await;
+    let err = match validator.simulate_transaction(
+        build_change_epoch_system_transaction(),
+        TransactionChecks::Enabled,
+        false,
+    ) {
+        Ok(_) => panic!("expected system transaction to be rejected before fullnode guard"),
+        Err(err) => err,
+    };
+
+    assert!(matches!(
+        err.as_inner(),
+        SuiErrorKind::UnsupportedFeatureError { error }
+            if error == "simulate does not support system transactions"
+    ));
+}
+
+#[tokio::test]
+async fn simulate_transaction_rejects_system_tx_before_dev_inspect_disabled_guard() {
+    let fullnode_key_pair = get_authority_key_pair().1;
+    let fullnode = TestAuthorityBuilder::new()
+        .with_dev_inspect_disabled()
+        .with_keypair(&fullnode_key_pair)
+        .build()
+        .await;
+
+    let err = match fullnode.simulate_transaction(
+        build_change_epoch_system_transaction(),
+        TransactionChecks::Disabled,
+        false,
+    ) {
+        Ok(_) => panic!("expected system transaction to be rejected before dev-inspect guard"),
+        Err(err) => err,
+    };
+
+    assert!(matches!(
+        err.as_inner(),
+        SuiErrorKind::UnsupportedFeatureError { error }
+            if error == "simulate does not support system transactions"
+    ));
+}
+
+#[tokio::test]
+async fn simulate_transaction_sets_mock_gas_id_and_result_objects() {
+    let env = setup_test_env().await;
+    let mut data = build_transfer(&env, TEST_GAS_BUDGET, env.rgp);
+    data.gas_data_mut().payment = vec![];
+
+    let result = env
+        .fullnode
+        .simulate_transaction(data, TransactionChecks::Enabled, true)
+        .unwrap();
+
+    assert_eq!(result.mock_gas_id, Some(ObjectID::MAX));
+    assert_eq!(result.suggested_gas_price, None);
+    assert!(result.events.is_none());
+    assert!(
+        result
+            .objects
+            .iter()
+            .any(|object| object.id() == env.object_ref.0)
+    );
+    assert!(
+        result
+            .objects
+            .iter()
+            .any(|object| object.id() == ObjectID::MAX)
     );
 }
 

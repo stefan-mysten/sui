@@ -67,6 +67,7 @@ use crate::authority::shared_object_congestion_tracker::SharedObjectCongestionTr
 use crate::authority::test_authority_builder::TestAuthorityBuilder;
 use crate::authority::transaction_deferral::DeferralKey;
 use crate::checkpoints::CheckpointServiceNotify;
+use crate::congestion_tracker::CongestionInfo;
 use crate::consensus_handler::ConsensusHandler;
 use crate::consensus_test_utils;
 use crate::test_utils::init_state_parameters_from_rng;
@@ -86,6 +87,7 @@ pub use crate::authority::authority_test_utils::*;
 use crate::authority::shared_object_version_manager::AssignedVersions;
 use std::collections::HashMap;
 use sui_types::transaction::TransactionKey;
+use sui_types::transaction_executor::TransactionChecks;
 
 fn handle_transaction_for_test(
     authority: &AuthorityState,
@@ -293,6 +295,48 @@ async fn test_dry_run_transaction_block() {
     let gas_usage_no_gas = response.effects.gas_cost_summary();
     assert_eq!(*response.effects.status(), SuiExecutionStatus::Success);
     assert_eq!(gas_usage, gas_usage_no_gas);
+}
+
+#[tokio::test]
+async fn simulate_transaction_propagates_suggested_gas_price_for_shared_object_tx() {
+    let (_validator, fullnode, transaction, gas_object_id, shared_object_id) =
+        construct_shared_object_transaction_with_sequence_number(None).await;
+    let expected_gas_price = 777;
+    fullnode
+        .congestion_tracker
+        .congestion_clearing_prices
+        .insert(
+            shared_object_id,
+            CongestionInfo {
+                last_cancellation_time: 100,
+                highest_cancelled_gas_price: expected_gas_price,
+                last_success_time: None,
+                lowest_executed_gas_price: None,
+            },
+        );
+
+    let result = fullnode
+        .simulate_transaction(
+            transaction.data().transaction_data().clone(),
+            TransactionChecks::Enabled,
+            false,
+        )
+        .unwrap();
+
+    assert_eq!(result.suggested_gas_price, Some(expected_gas_price));
+    assert_eq!(result.mock_gas_id, None);
+    assert!(
+        result
+            .objects
+            .iter()
+            .any(|object| object.id() == gas_object_id)
+    );
+    assert!(
+        result
+            .objects
+            .iter()
+            .any(|object| object.id() == shared_object_id)
+    );
 }
 
 #[tokio::test]

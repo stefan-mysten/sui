@@ -6,10 +6,8 @@
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::sync::Arc;
 
-use move_core_types::language_storage::TypeTag;
-use sui_config::{
-    transaction_deny_config::TransactionDenyConfig, verifier_signing_config::VerifierSigningConfig,
-};
+use sui_config::transaction_deny_config::TransactionDenyConfig;
+use sui_config::verifier_signing_config::VerifierSigningConfig;
 use sui_types::{
     accumulator_root::AccumulatorObjId,
     base_types::{ObjectID, ObjectRef, SuiAddress},
@@ -26,7 +24,6 @@ use sui_types::{
     inner_temporary_store::InnerTemporaryStore,
     metrics::{BytecodeVerifierMetrics, ExecutionMetrics},
     object::{MoveObject, OBJECT_START_VERSION, Object, Owner},
-    signature::GenericSignature,
     storage::{BackingPackageStore, BackingStore, TrackingBackingStore},
     transaction::{
         CheckedInputObjects, GasData, InputObjectKind, InputObjects, ObjectReadResult,
@@ -113,7 +110,7 @@ struct ExecutedSimulation {
 ///
 /// Returns an error if the transaction is unsupported for simulation, fails input validation, or
 /// fails any shared pre-execution checks.
-pub fn simulate_transaction_with_context<C: SimulationContext>(
+pub fn simulate_transaction<C: SimulationContext>(
     params: &SimulationParams<'_>,
     ctx: &C,
     transaction: TransactionData,
@@ -193,7 +190,7 @@ fn prepare_simulation<C: SimulationContext>(
         None
     };
 
-    let declared_withdrawals = pre_object_load_checks(
+    let declared_withdrawals = crate::authority::pre_object_load_checks(
         &transaction,
         &[],
         &input_object_kinds,
@@ -270,48 +267,6 @@ fn prepare_simulation<C: SimulationContext>(
         address_funds,
         mock_gas_id,
     })
-}
-
-/// Runs deny list checks and processes funds withdrawals. Called before loading
-/// input objects, since these checks don't depend on object state.
-///
-/// This is the single canonical implementation shared by both the fullnode
-/// simulation path and the `AuthorityState` signing path.
-pub fn pre_object_load_checks(
-    tx_data: &TransactionData,
-    tx_signatures: &[GenericSignature],
-    input_object_kinds: &[InputObjectKind],
-    receiving_object_refs: &[ObjectRef],
-    transaction_deny_config: &TransactionDenyConfig,
-    package_store: &dyn BackingPackageStore,
-    chain_identifier: ChainIdentifier,
-    coin_reservation_resolver: &dyn CoinReservationResolverTrait,
-    account_funds_read: &dyn AccountFundsRead,
-    protocol_config: &sui_protocol_config::ProtocolConfig,
-) -> SuiResult<BTreeMap<AccumulatorObjId, (u64, TypeTag)>> {
-    // Note: the deny checks may do redundant package loads but:
-    // - they only load packages when there is an active package deny map
-    // - the loads are cached anyway
-    sui_transaction_checks::deny::check_transaction_for_signing(
-        tx_data,
-        tx_signatures,
-        input_object_kinds,
-        receiving_object_refs,
-        transaction_deny_config,
-        package_store,
-    )?;
-
-    let declared_withdrawals = tx_data
-        .process_funds_withdrawals_for_signing(chain_identifier, coin_reservation_resolver)?;
-    account_funds_read.check_amounts_available(&declared_withdrawals)?;
-
-    if protocol_config.gasless_verify_remaining_balance() && tx_data.is_gasless_transaction() {
-        let min_amounts = sui_types::transaction::get_gasless_allowed_token_types(protocol_config);
-        account_funds_read
-            .check_remaining_amounts_after_withdrawal(&declared_withdrawals, &min_amounts)?;
-    }
-
-    Ok(declared_withdrawals)
 }
 
 fn execute_prepared_simulation(
@@ -474,7 +429,15 @@ fn build_simulation_result(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use move_binary_format::binary_config::BinaryConfig;
     use sui_types::base_types::SequenceNumber;
+    use sui_types::effects::TransactionEvents;
+    use sui_types::execution_status::ExecutionStatus;
+    use sui_types::gas::GasCostSummary;
+    use sui_types::object::Object;
+    use sui_types::programmable_transaction_builder::ProgrammableTransactionBuilder;
+    use sui_types::storage::ObjectKey;
+    use sui_types::transaction::TransactionData;
 
     struct FakeAccountFundsRead {
         balances: BTreeMap<AccumulatorObjId, (u128, SequenceNumber)>,
@@ -522,5 +485,82 @@ mod tests {
             &max_withdraws,
             &BTreeSet::from([address_fund, object_fund]),
         ));
+    }
+
+    #[test]
+    fn build_simulation_result_preserves_auxiliary_fields() {
+        let sender = SuiAddress::random_for_testing_only();
+        let gas_object =
+            Object::with_id_owner_gas_for_testing(ObjectID::from_single_byte(1), sender, 1_000_000);
+        let input_object = Object::with_id_owner_for_testing(ObjectID::from_single_byte(2), sender);
+        let runtime_object =
+            Object::with_id_owner_for_testing(ObjectID::from_single_byte(3), sender);
+        let gas_object_ref = gas_object.compute_object_reference();
+        let gas_owner = gas_object.owner.clone();
+
+        let transaction = TransactionData::new(
+            TransactionKind::ProgrammableTransaction(
+                ProgrammableTransactionBuilder::new().finish(),
+            ),
+            sender,
+            gas_object_ref,
+            1_000_000,
+            1,
+        );
+        let events = TransactionEvents::default();
+        let effects = TransactionEffects::new_from_execution_v1(
+            ExecutionStatus::Success,
+            0,
+            GasCostSummary::default(),
+            vec![],
+            vec![],
+            transaction.digest(),
+            vec![],
+            vec![(gas_object_ref, gas_owner.clone())],
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            (gas_object_ref, gas_owner),
+            Some(events.digest()),
+            vec![],
+        );
+
+        let mut loaded_runtime_objects = ObjectSet::default();
+        loaded_runtime_objects.insert(runtime_object.clone());
+
+        let executed = ExecutedSimulation {
+            transaction,
+            inner_temp_store: InnerTemporaryStore {
+                input_objects: BTreeMap::from([
+                    (gas_object.id(), gas_object),
+                    (input_object.id(), input_object),
+                ]),
+                stream_ended_consensus_objects: BTreeMap::new(),
+                mutable_inputs: BTreeMap::new(),
+                written: BTreeMap::new(),
+                loaded_runtime_objects: BTreeMap::new(),
+                events: events.clone(),
+                accumulator_events: vec![],
+                binary_config: BinaryConfig::standard(),
+                runtime_packages_loaded_from_db: BTreeMap::new(),
+                lamport_version: SequenceNumber::new(),
+                accumulator_running_max_withdraws: BTreeMap::new(),
+            },
+            effects,
+            execution_result: Ok(vec![]),
+            loaded_runtime_objects,
+            mock_gas_id: Some(ObjectID::MAX),
+        };
+
+        let result = build_simulation_result(executed, Some(77));
+
+        assert_eq!(result.suggested_gas_price, Some(77));
+        assert_eq!(result.mock_gas_id, Some(ObjectID::MAX));
+        assert_eq!(result.events.as_ref(), Some(&events));
+        assert_eq!(
+            result.unchanged_loaded_runtime_objects,
+            vec![ObjectKey(runtime_object.id(), runtime_object.version())],
+        );
     }
 }

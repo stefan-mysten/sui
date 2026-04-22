@@ -20,7 +20,7 @@ use crate::execution_scheduler::funds_withdraw_scheduler::FundsSettlement;
 use crate::gasless_rate_limiter::ConsensusGaslessCounter;
 use crate::jsonrpc_index::CoinIndexKey2;
 use crate::rpc_index::RpcIndexStore;
-use crate::simulation::{SimulationContext, SimulationParams, simulate_transaction_with_context};
+use crate::simulation::{SimulationContext, SimulationParams, simulate_transaction};
 use crate::traffic_controller::TrafficController;
 use crate::traffic_controller::metrics::TrafficControllerMetrics;
 use crate::transaction_outputs::TransactionOutputs;
@@ -130,7 +130,7 @@ use sui_storage::key_value_store_metrics::KeyValueStoreMetrics;
 use sui_types::accumulator_root::AccumulatorValue;
 use sui_types::authenticator_state::get_authenticator_state;
 use sui_types::balance::Balance;
-use sui_types::coin_reservation;
+use sui_types::coin_reservation::{self, CoinReservationResolverTrait};
 use sui_types::committee::{EpochId, ProtocolVersion};
 use sui_types::crypto::{AuthoritySignInfo, Signer, default_hash};
 use sui_types::deny_list_v1::check_coin_deny_list_v1;
@@ -210,6 +210,7 @@ pub use crate::checkpoints::checkpoint_executor::utils::{
     CheckpointTimeoutConfig, init_checkpoint_timeout_config,
 };
 
+use sui_config::transaction_deny_config::TransactionDenyConfig;
 #[cfg(msim)]
 use sui_types::committee::CommitteeTrait;
 use sui_types::deny_list_v2::check_coin_deny_list_v2_during_signing;
@@ -1027,28 +1028,6 @@ impl AuthorityState {
         self.checkpoint_store.get_epoch_state_commitments(epoch)
     }
 
-    fn pre_object_load_checks(
-        &self,
-        tx_data: &TransactionData,
-        tx_signatures: &[GenericSignature],
-        input_object_kinds: &[InputObjectKind],
-        receiving_objects_refs: &[ObjectRef],
-        protocol_config: &ProtocolConfig,
-    ) -> SuiResult<BTreeMap<AccumulatorObjId, (u64, TypeTag)>> {
-        crate::simulation::pre_object_load_checks(
-            tx_data,
-            tx_signatures,
-            input_object_kinds,
-            receiving_objects_refs,
-            &self.config.transaction_deny_config,
-            self.get_backing_package_store().as_ref(),
-            self.chain_identifier,
-            self.coin_reservation_resolver.as_ref(),
-            self.get_account_funds_read().as_ref(),
-            protocol_config,
-        )
-    }
-
     fn handle_transaction_deny_checks(
         &self,
         transaction: &VerifiedTransaction,
@@ -1060,11 +1039,16 @@ impl AuthorityState {
         let input_object_kinds = tx_data.input_objects()?;
         let receiving_objects_refs = tx_data.receiving_objects();
 
-        self.pre_object_load_checks(
+        pre_object_load_checks(
             tx_data,
             transaction.tx_signatures(),
             &input_object_kinds,
             &receiving_objects_refs,
+            &self.config.transaction_deny_config,
+            self.get_backing_package_store().as_ref(),
+            self.chain_identifier,
+            self.coin_reservation_resolver.as_ref(),
+            self.get_account_funds_read().as_ref(),
             epoch_store.protocol_config(),
         )?;
 
@@ -2495,6 +2479,13 @@ impl AuthorityState {
         checks: TransactionChecks,
         allow_mock_gas_coin: bool,
     ) -> SuiResult<SimulateTransactionResult> {
+        if transaction.kind().is_system_tx() {
+            return Err(SuiErrorKind::UnsupportedFeatureError {
+                error: "simulate does not support system transactions".to_string(),
+            }
+            .into());
+        }
+
         let epoch_store = self.load_epoch_store_one_call_per_task();
         if !self.is_fullnode(&epoch_store) {
             return Err(SuiErrorKind::UnsupportedFeatureError {
@@ -2534,13 +2525,7 @@ impl AuthorityState {
             authority: self,
             epoch_store: &epoch_store,
         };
-        simulate_transaction_with_context(
-            &params,
-            &context,
-            transaction,
-            checks,
-            allow_mock_gas_coin,
-        )
+        simulate_transaction(&params, &context, transaction, checks, allow_mock_gas_coin)
     }
 
     /// The object ID for gas can be any object ID, even for an uncreated object
@@ -6952,4 +6937,46 @@ impl NodeStateDump {
         let file = File::open(path)?;
         serde_json::from_reader(file).map_err(|e| anyhow::anyhow!(e))
     }
+}
+
+/// Runs deny list checks and processes funds withdrawals. Called before loading
+/// input objects, since these checks don't depend on object state.
+///
+/// This is the single canonical implementation shared by both the fullnode
+/// simulation path and the `AuthorityState` signing path.
+pub(crate) fn pre_object_load_checks(
+    tx_data: &TransactionData,
+    tx_signatures: &[GenericSignature],
+    input_object_kinds: &[InputObjectKind],
+    receiving_objects_refs: &[ObjectRef],
+    transaction_deny_config: &TransactionDenyConfig,
+    package_store: &dyn BackingPackageStore,
+    chain_identifier: ChainIdentifier,
+    coin_reservation_resolver: &dyn CoinReservationResolverTrait,
+    account_funds_read: &dyn AccountFundsRead,
+    protocol_config: &sui_protocol_config::ProtocolConfig,
+) -> SuiResult<BTreeMap<AccumulatorObjId, (u64, TypeTag)>> {
+    // Note: the deny checks may do redundant package loads but:
+    // - they only load packages when there is an active package deny map
+    // - the loads are cached anyway
+    sui_transaction_checks::deny::check_transaction_for_signing(
+        tx_data,
+        tx_signatures,
+        input_object_kinds,
+        receiving_objects_refs,
+        transaction_deny_config,
+        package_store,
+    )?;
+
+    let declared_withdrawals = tx_data
+        .process_funds_withdrawals_for_signing(chain_identifier, coin_reservation_resolver)?;
+    account_funds_read.check_amounts_available(&declared_withdrawals)?;
+
+    if protocol_config.gasless_verify_remaining_balance() && tx_data.is_gasless_transaction() {
+        let min_amounts = sui_types::transaction::get_gasless_allowed_token_types(protocol_config);
+        account_funds_read
+            .check_remaining_amounts_after_withdrawal(&declared_withdrawals, &min_amounts)?;
+    }
+
+    Ok(declared_withdrawals)
 }
