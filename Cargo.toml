@@ -424,8 +424,8 @@ moka = { version = "0.12", default-features = false, features = [
   "atomic64",
 ] }
 more-asserts = "0.3.1"
-msim = { git = "https://github.com/MystenLabs/mysten-sim.git", rev = "213e543d83b91c4aa904166bef255a6c0054c8a7", package = "msim" }
-msim-macros = { git = "https://github.com/MystenLabs/mysten-sim.git", rev = "213e543d83b91c4aa904166bef255a6c0054c8a7", package = "msim-macros" }
+msim = { git = "https://github.com/MystenLabs/mysten-sim.git", rev = "53016c1a9038154b1e47b96f0a314efa7e7d809b", package = "msim" }
+msim-macros = { git = "https://github.com/MystenLabs/mysten-sim.git", rev = "53016c1a9038154b1e47b96f0a314efa7e7d809b", package = "msim-macros" }
 multiaddr = "0.18.2"
 nexlint = { git = "https://github.com/nextest-rs/nexlint.git", rev = "7ce56bd591242a57660ed05f14ca2483c37d895b" }
 nexlint-lints = { git = "https://github.com/nextest-rs/nexlint.git", rev = "7ce56bd591242a57660ed05f14ca2483c37d895b" }
@@ -517,7 +517,7 @@ test-fuzz = "3.0.4"
 thiserror = "1.0.40"
 timeout-tracing = "0.1.2"
 tiny-bip39 = "1.0.0"
-tokio = "=1.49.0"
+tokio = "=1.52.1"
 tokio-rustls = { version = "0.26", default-features = false, features = [
   "tls12",
   "ring",
