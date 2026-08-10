@@ -137,7 +137,9 @@ pub async fn initialize(
         rpc_chain_identifier,
     )?;
     let store = ForkStore::from_parts(forked_at_checkpoint, gql, local, services.local_store());
-    store.save_checkpoint(&checkpoint, &checkpoint_contents)?;
+    store
+        .local_store()
+        .save_checkpoint(&checkpoint, &checkpoint_contents)?;
     let seed_manifest =
         crate::seed::prepare_seed_manifest(&store, network_name, &seed_input).await?;
 
