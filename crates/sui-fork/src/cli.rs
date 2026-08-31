@@ -1,12 +1,12 @@
 // Copyright (c) Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-use anyhow::Context;
 use anyhow::Result;
 use clap::CommandFactory;
 use clap::FromArgMatches;
 use clap::Parser;
 use clap::Subcommand;
+use prometheus::Registry;
 use reqwest::Url;
 use serde::Serialize;
 use tracing::info;
@@ -17,7 +17,6 @@ use crate::DEFAULT_RPC_ADDR;
 use crate::ForkingServiceClient;
 use crate::GetStatusRequest;
 use crate::StartArgs;
-use crate::gql::GraphQLClient;
 use crate::seed::SeedInput;
 
 #[derive(Parser)]
@@ -146,56 +145,36 @@ async fn cmd_start(args: StartArgs, json_output: bool, version: &'static str) ->
         addresses: addresses.into_iter().collect(),
         object_ids: object_ids.into_iter().collect(),
     };
-    let network_name = node.network_name();
-
-    let resolved_start = crate::startup::resolve_start_checkpoint_from_local(
-        &node,
-        checkpoint,
-        data_dir.as_deref(),
-    )?;
-    let checkpoint = match resolved_start.checkpoint {
-        Some(cp) => cp,
-        None => GraphQLClient::new(node.clone(), version)?
-            .get_latest_checkpoint_sequence_number()
-            .await?
-            .with_context(|| format!("failed to get latest checkpoint for {}", network_name))?,
-    };
-
-    let (context, subscription_handle, indexer_service) =
-        crate::startup::initialize(node, checkpoint, version, data_dir, seed_input).await?;
-    let current_checkpoint = {
-        let sim = context.simulacrum().read().await;
-        sim.store()
-            .get_highest_verified_checkpoint()?
-            .map(|checkpoint| checkpoint.data().sequence_number)
-            .unwrap_or(checkpoint)
-    };
+    let registry = Registry::new();
+    let parts =
+        crate::startup::initialize(node, checkpoint, version, data_dir, seed_input, &registry)
+            .await?;
 
     let output = StartOutput {
-        network: network_name.clone(),
-        checkpoint,
+        network: parts.network_name.clone(),
+        checkpoint: parts.forked_at_checkpoint,
         rpc_addr: rpc_addr.to_string(),
-        current_checkpoint,
-        resuming: resolved_start.resuming,
+        current_checkpoint: parts.starting_checkpoint,
+        resuming: parts.resumed,
     };
     print_output(&output, json_output);
 
-    if resolved_start.resuming {
+    if parts.resumed {
         info!(
             "Resuming forked network from {}; forked at checkpoint {}, current checkpoint {} (rpc on {})",
-            network_name, checkpoint, current_checkpoint, rpc_addr,
+            parts.network_name, parts.forked_at_checkpoint, parts.starting_checkpoint, rpc_addr,
         );
     } else {
         info!(
             "Starting forked network from {} at checkpoint {} (rpc on {})",
-            network_name, checkpoint, rpc_addr,
+            parts.network_name, parts.forked_at_checkpoint, rpc_addr,
         );
     }
 
     let handle = tokio::spawn(crate::startup::run(
-        context,
-        subscription_handle,
-        indexer_service,
+        parts.context,
+        parts.subscription_handle,
+        parts.indexer_service,
         rpc_addr,
         version,
     ));
