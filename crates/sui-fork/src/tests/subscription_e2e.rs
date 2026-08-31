@@ -18,35 +18,26 @@ use simulacrum::Simulacrum;
 use simulacrum::SimulatorStore;
 use simulacrum::store::in_mem_store::KeyStore;
 use sui_futures::service::Service;
-use sui_rpc_api::RpcService;
-use sui_rpc_api::ServerVersion;
 use sui_rpc_api::proto::sui::rpc::v2::SubscribeCheckpointsRequest;
 use sui_rpc_api::proto::sui::rpc::v2::subscription_service_client::SubscriptionServiceClient;
 use sui_rpc_api::subscription::SubscriptionService;
 use sui_swarm_config::network_config_builder::ConfigBuilder;
 use sui_types::base_types::ObjectID;
 use sui_types::object::Object;
-use sui_types::storage::RpcStateReader;
 
 use crate::AdvanceCheckpointRequest;
 use crate::AdvanceClockRequest;
 use crate::ForkingServiceClient;
 use crate::GetStatusRequest;
 use crate::context::Context;
-use crate::proto::forking::forking_service_server::ForkingServiceServer;
-use crate::rpc::executor::ForkedTransactionExecutor;
-use crate::rpc::forking_service::ForkingServiceImpl;
 use crate::services::ServiceManager;
+use crate::startup;
 use crate::store::ForkStore;
 
-/// In-process gRPC harness. It builds a fresh Simulacrum from a genesis `NetworkConfig`, wires up
-/// the subscription broker, and starts a tonic server on an ephemeral port. The server task is
-/// aborted when the harness is dropped.
+/// In-process gRPC harness that serves a synthetic fork on an ephemeral port.
 struct ServerHarness {
-    server_task: tokio::task::JoinHandle<()>,
+    service: Service,
     grpc_endpoint: String,
-    _indexer_service: Service,
-    // Held to keep the RPC store alive for the lifetime of the server.
     // Held to keep the metadata and RPC store directory alive for the server lifetime.
     _temp: tempfile::TempDir,
     // Held so remote object probes keep resolving to "not found".
@@ -110,54 +101,37 @@ impl ServerHarness {
             .expect("service-backed context should initialize");
         let context = Arc::new(context);
 
-        let reader: Arc<dyn RpcStateReader> = Arc::new(store);
-        let mut service = RpcService::new(reader);
-        service.with_server_version(ServerVersion::new("sui-fork", "test"));
-        service.with_subscription_service(subscription_handle);
-        service.with_executor(Arc::new(ForkedTransactionExecutor::new(context.clone())));
-        service.with_custom_service(ForkingServiceServer::new(ForkingServiceImpl::new(
-            context.clone(),
-        )));
-        service.with_file_descriptor_set(crate::proto::FILE_DESCRIPTOR_SET);
+        let listener = startup::bind("127.0.0.1:0".parse()?).await?;
+        let (addr, server) =
+            startup::serve(context, subscription_handle, listener, "test", &registry).await?;
+        let service = server.merge(indexer_service);
 
-        // Bind to ephemeral port via a probe listener, then drop and let
-        // `start_service` rebind. The window between is short enough not to
-        // matter for in-process tests.
-        let probe = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
-        let addr = probe.local_addr()?;
-        drop(probe);
-
-        let server_task = tokio::spawn(async move { service.start_service(addr).await });
-
-        let grpc_endpoint = format!("http://{addr}");
-
-        // Wait for the server to come up by polling a connect.
-        for _ in 0..50 {
-            if ForkingServiceClient::connect(grpc_endpoint.clone())
-                .await
-                .is_ok()
-            {
-                return Ok(Self {
-                    server_task,
-                    grpc_endpoint,
-                    _indexer_service: indexer_service,
-                    _temp: temp,
-                    _gql_server: gql_server,
-                });
-            }
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-        Err(anyhow!("timed out waiting for gRPC server to bind"))
+        Ok(Self {
+            service,
+            grpc_endpoint: format!("http://{addr}"),
+            _temp: temp,
+            _gql_server: gql_server,
+        })
     }
-}
 
-impl Drop for ServerHarness {
-    fn drop(&mut self) {
-        self.server_task.abort();
+    async fn shutdown(self) -> Result<()> {
+        self.service.shutdown().await.map_err(Into::into)
     }
 }
 
 const STREAM_RECV_TIMEOUT: Duration = Duration::from_secs(5);
+
+#[tokio::test]
+async fn shutdown_stops_rpc_server() -> Result<()> {
+    let harness = ServerHarness::start().await?;
+    let grpc_endpoint = harness.grpc_endpoint.clone();
+    ForkingServiceClient::connect(grpc_endpoint.clone()).await?;
+
+    harness.shutdown().await?;
+
+    assert!(ForkingServiceClient::connect(grpc_endpoint).await.is_err());
+    Ok(())
+}
 
 #[tokio::test]
 async fn subscription_streams_checkpoints_after_advance() -> Result<()> {

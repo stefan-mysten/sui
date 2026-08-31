@@ -177,6 +177,7 @@ async fn cmd_start(args: StartArgs, json_output: bool, version: &'static str) ->
         parts.indexer_service,
         rpc_addr,
         version,
+        registry,
     ));
     handle.await??;
 

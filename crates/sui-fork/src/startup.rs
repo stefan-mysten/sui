@@ -12,10 +12,12 @@ use anyhow::Result;
 use anyhow::anyhow;
 use prometheus::Registry;
 use rand::rngs::OsRng;
+use tokio::sync::oneshot;
 use tracing::info;
 
 use simulacrum::Simulacrum;
 use simulacrum::store::in_mem_store::KeyStore;
+use sui_futures::service::Error as ServiceError;
 use sui_futures::service::Service;
 use sui_protocol_config::Chain;
 use sui_protocol_config::ProtocolVersion;
@@ -252,59 +254,89 @@ pub(crate) fn resume_base_checkpoint(store: &ForkStore) -> Result<VerifiedCheckp
         .ok_or_else(|| anyhow!("no local checkpoint available to resume from"))
 }
 
-/// Run the forked network. Spawns the `sui-rpc-api` `RpcService` bound to `rpc_addr`, backed by the
-/// `ForkStore`'s RPC trait impls, then blocks on Ctrl+C.
-pub async fn run(
-    context: Context,
+/// Bind the fork's RPC listener and return bind failures to the caller.
+pub(crate) async fn bind(rpc_addr: SocketAddr) -> Result<tokio::net::TcpListener> {
+    tokio::net::TcpListener::bind(rpc_addr)
+        .await
+        .with_context(|| format!("failed to bind fork RPC server to {rpc_addr}"))
+}
+
+/// Serve a fork over an already-bound listener and return its composable service.
+///
+/// The service drains in-flight RPC requests during graceful shutdown. The caller retains the
+/// embedded indexer separately and can merge both services when their lifetimes should match.
+pub(crate) async fn serve(
+    context: Arc<Context>,
     subscription_handle: SubscriptionServiceHandle,
-    mut indexer_service: Service,
-    rpc_addr: SocketAddr,
+    listener: tokio::net::TcpListener,
     version: &'static str,
-) -> Result<()> {
+    registry: &Registry,
+) -> Result<(SocketAddr, Service)> {
     let store = {
         let sim = context.simulacrum().read().await;
         sim.store().clone()
     };
     let reader: Arc<dyn RpcStateReader> = Arc::new(store);
 
-    // Serve through `sui-rpc-api`'s `RpcService` directly (the fork does not
-    // depend on `sui-rpc-node`). The `ForkStore` itself is the
-    // `RpcStateReader`, with the fork admin service and executor attached.
-    let mut service = RpcService::new(reader);
-    service.with_server_version(ServerVersion::new("sui-fork", version));
-    service.with_subscription_service(subscription_handle);
-    let context = Arc::new(context);
-    service.with_executor(Arc::new(ForkedTransactionExecutor::new(context.clone())));
-    service.with_custom_service(ForkingServiceServer::new(ForkingServiceImpl::new(
-        context.clone(),
-    )));
-    service.with_file_descriptor_set(crate::proto::FILE_DESCRIPTOR_SET);
+    // Serve through `sui-rpc-api` directly. ForkStore is the RpcStateReader,
+    // with the fork admin service and executor attached.
+    let mut rpc = RpcService::new(reader);
+    rpc.with_server_version(ServerVersion::new("sui-fork", version));
+    rpc.with_metrics(registry);
+    rpc.with_subscription_service(subscription_handle);
+    rpc.with_executor(Arc::new(ForkedTransactionExecutor::new(context.clone())));
+    rpc.with_custom_service(ForkingServiceServer::new(ForkingServiceImpl::new(context)));
+    rpc.with_file_descriptor_set(crate::proto::FILE_DESCRIPTOR_SET);
+
+    let rpc_addr = listener
+        .local_addr()
+        .context("failed to read the fork RPC server's bound address")?;
+    let router = rpc.into_router().await;
+    let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
 
     info!("starting sui-rpc-api server on {rpc_addr}");
-    let server_handle = tokio::spawn(async move { service.start_service(rpc_addr).await });
+    let service = Service::new()
+        .with_shutdown_signal(async move {
+            let _ = shutdown_sender.send(());
+        })
+        .spawn(async move {
+            axum::serve(listener, router)
+                .with_graceful_shutdown(async move {
+                    let _ = shutdown_receiver.await;
+                    info!("shutdown received, stopping fork RPC server");
+                })
+                .await
+                .context("fork RPC server failed")
+        });
 
-    info!("forked network running, waiting for shutdown signal (Ctrl+C)");
-    tokio::select! {
-        res = tokio::signal::ctrl_c() => {
-            res?;
-            info!("shutdown signal received, stopping forked network");
-        }
-        join = server_handle => {
-            if let Err(e) = join {
-                return Err(anyhow!("rpc server task panicked: {e}"));
-            }
-            return Err(anyhow!("rpc server task exited unexpectedly"));
-        }
-        stopped = indexer_service.join() => {
-            // Without this watchdog an indexer failure would only surface as
-            // a 30s publication timeout on the next executed transaction.
-            return match stopped {
-                Ok(()) => Err(anyhow!("embedded rpc-store indexer stopped unexpectedly")),
-                Err(e) => Err(e.context("embedded rpc-store indexer failed")),
-            };
-        }
+    Ok((rpc_addr, service))
+}
+
+/// Run the forked network until it receives a process termination signal.
+pub async fn run(
+    context: Context,
+    subscription_handle: SubscriptionServiceHandle,
+    indexer_service: Service,
+    rpc_addr: SocketAddr,
+    version: &'static str,
+    registry: Registry,
+) -> Result<()> {
+    let listener = bind(rpc_addr).await?;
+    let (_, server) = serve(
+        Arc::new(context),
+        subscription_handle,
+        listener,
+        version,
+        &registry,
+    )
+    .await?;
+
+    info!("forked network running, waiting for shutdown signal");
+    match server.merge(indexer_service).main().await {
+        Err(ServiceError::Terminated) => Ok(()),
+        Ok(()) => Err(anyhow!("forked network tasks exited unexpectedly")),
+        Err(error) => Err(error.into()),
     }
-    Ok(())
 }
 
 /// Replace the validator set in the system state with local validators from the NetworkConfig
