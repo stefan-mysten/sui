@@ -146,6 +146,19 @@ async fn shutdown_stops_rpc_server() -> Result<()> {
 }
 
 #[tokio::test]
+async fn into_service_keeps_grpc_administration_available() -> Result<()> {
+    let harness = ServerHarness::start().await?;
+    let grpc_endpoint = harness.grpc_endpoint.clone();
+    let service = harness.node.into_service();
+
+    let mut client = ForkingServiceClient::connect(grpc_endpoint).await?;
+    client.get_status(GetStatusRequest {}).await?;
+
+    service.shutdown().await?;
+    Ok(())
+}
+
+#[tokio::test]
 async fn in_process_administration_uses_rpc_response_types() -> Result<()> {
     let harness = ServerHarness::start().await?;
     let initial = harness.node.status().await?;
