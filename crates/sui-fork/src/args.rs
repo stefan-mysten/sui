@@ -25,7 +25,10 @@ pub struct StartArgs {
     #[arg(long, default_value = "mainnet")]
     pub network: Node,
 
-    /// Checkpoint sequence number to fork at, or the latest checkpoint when omitted.
+    /// Checkpoint sequence number to fork at.
+    ///
+    /// When omitted, compatible state in `data_dir` is resumed. A new fork uses the live network's
+    /// latest checkpoint when the directory contains no existing fork.
     #[arg(long)]
     pub checkpoint: Option<CheckpointSequenceNumber>,
 
@@ -41,7 +44,7 @@ pub struct StartArgs {
     #[arg(long = "object")]
     pub object_ids: Vec<ObjectID>,
 
-    /// Address for the fork's RPC server.
+    /// Address for the fork's RPC server. Port 0 selects an available ephemeral port.
     #[arg(long, default_value = DEFAULT_RPC_ADDR)]
     pub rpc_addr: SocketAddr,
 }

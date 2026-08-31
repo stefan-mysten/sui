@@ -20,6 +20,50 @@ A development tool that enables testing and developing against a local Sui netwo
 > Unlike a standard local Sui network with validators, the forking tool runs in lock-step mode where each transaction is executed sequentially and creates a checkpoint.
 > That means that you have full control over the advancement of checkpoints, time, (and soon epochs too) to simulate different scenarios.
 
+## Rust API
+
+`ForkNode` starts and administers a fork in-process while serving the same network over gRPC:
+
+```rust
+use std::time::Duration;
+
+use prometheus::Registry;
+use sui_fork::{ForkNode, Node, StartArgs};
+
+async fn run() -> anyhow::Result<()> {
+    let registry = Registry::new();
+    let fork = ForkNode::start(
+        StartArgs {
+            network: Node::Testnet,
+            data_dir: Some("/tmp/sui-fork-demo".into()),
+            rpc_addr: "127.0.0.1:0".parse()?,
+            ..StartArgs::default()
+        },
+        env!("CARGO_PKG_VERSION"),
+        &registry,
+    )
+    .await?;
+
+    println!("fork RPC listening on {}", fork.rpc_address());
+    let status = fork.status().await?;
+    println!("current checkpoint: {}", status.checkpoint_sequence_number);
+
+    fork.advance_clock(Duration::from_secs(1)).await?;
+    fork.advance_checkpoint().await?;
+    fork.shutdown().await?;
+    Ok(())
+}
+```
+
+Call `into_service` to merge the fork with other `sui_futures::service::Service` instances. The
+conversion consumes `ForkNode`, so in-process administration methods are no longer available. The
+gRPC administration service remains available until the containing service shuts down.
+
+Starting with the same persistent data directory resumes the fork from its highest local
+checkpoint. Seed addresses and objects apply only when creating a fork, so omit them when resuming.
+The library does not install signal handlers or initialize tracing because the embedding process
+owns both concerns.
+
 ## Quick Start
 
 #### 1. Build or install `sui-fork`
