@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use anyhow::Result;
+use anyhow::anyhow;
 use clap::CommandFactory;
 use clap::FromArgMatches;
 use clap::Parser;
@@ -9,15 +10,16 @@ use clap::Subcommand;
 use prometheus::Registry;
 use reqwest::Url;
 use serde::Serialize;
+use sui_futures::service::Error as ServiceError;
 use tracing::info;
 
 use crate::AdvanceCheckpointRequest;
 use crate::AdvanceClockRequest;
 use crate::DEFAULT_RPC_ADDR;
+use crate::ForkNode;
 use crate::ForkingServiceClient;
 use crate::GetStatusRequest;
 use crate::StartArgs;
-use crate::seed::SeedInput;
 
 #[derive(Parser)]
 #[command(name = "sui-fork", about = "Fork and interact with a Sui network")]
@@ -133,55 +135,40 @@ fn print_output<T: Serialize + std::fmt::Display>(value: &T, json_output: bool) 
 }
 
 async fn cmd_start(args: StartArgs, json_output: bool, version: &'static str) -> Result<()> {
-    let StartArgs {
-        network: node,
-        checkpoint,
-        data_dir,
-        addresses,
-        object_ids,
-        rpc_addr,
-    } = args;
-    let seed_input = SeedInput {
-        addresses: addresses.into_iter().collect(),
-        object_ids: object_ids.into_iter().collect(),
-    };
     let registry = Registry::new();
-    let parts =
-        crate::startup::initialize(node, checkpoint, version, data_dir, seed_input, &registry)
-            .await?;
+    let fork = ForkNode::start(args, version, &registry).await?;
 
     let output = StartOutput {
-        network: parts.network_name.clone(),
-        checkpoint: parts.forked_at_checkpoint,
-        rpc_addr: rpc_addr.to_string(),
-        current_checkpoint: parts.starting_checkpoint,
-        resuming: parts.resumed,
+        network: fork.network_name().to_owned(),
+        checkpoint: fork.forked_at_checkpoint(),
+        rpc_addr: fork.rpc_address().to_string(),
+        current_checkpoint: fork.starting_checkpoint(),
+        resuming: fork.resumed(),
     };
     print_output(&output, json_output);
 
-    if parts.resumed {
+    if fork.resumed() {
         info!(
             "Resuming forked network from {}; forked at checkpoint {}, current checkpoint {} (rpc on {})",
-            parts.network_name, parts.forked_at_checkpoint, parts.starting_checkpoint, rpc_addr,
+            fork.network_name(),
+            fork.forked_at_checkpoint(),
+            fork.starting_checkpoint(),
+            fork.rpc_address(),
         );
     } else {
         info!(
             "Starting forked network from {} at checkpoint {} (rpc on {})",
-            parts.network_name, parts.forked_at_checkpoint, rpc_addr,
+            fork.network_name(),
+            fork.forked_at_checkpoint(),
+            fork.rpc_address(),
         );
     }
 
-    let handle = tokio::spawn(crate::startup::run(
-        parts.context,
-        parts.subscription_handle,
-        parts.indexer_service,
-        rpc_addr,
-        version,
-        registry,
-    ));
-    handle.await??;
-
-    Ok(())
+    match fork.into_service().main().await {
+        Err(ServiceError::Terminated) => Ok(()),
+        Ok(()) => Err(anyhow!("forked network tasks exited unexpectedly")),
+        Err(error) => Err(error.into()),
+    }
 }
 
 async fn cmd_advance_clock(

@@ -17,7 +17,6 @@ use tracing::info;
 
 use simulacrum::Simulacrum;
 use simulacrum::store::in_mem_store::KeyStore;
-use sui_futures::service::Error as ServiceError;
 use sui_futures::service::Service;
 use sui_protocol_config::Chain;
 use sui_protocol_config::ProtocolVersion;
@@ -55,6 +54,7 @@ pub(crate) struct ForkParts {
     pub(crate) context: Context,
     pub(crate) subscription_handle: SubscriptionServiceHandle,
     pub(crate) indexer_service: Service,
+    pub(crate) data_dir: PathBuf,
     pub(crate) network_name: String,
     pub(crate) forked_at_checkpoint: CheckpointSequenceNumber,
     pub(crate) starting_checkpoint: CheckpointSequenceNumber,
@@ -145,6 +145,7 @@ pub(crate) async fn initialize(
     };
     let chain_identifier = gql.chain();
     let local = MetadataStore::new(&node, forked_at_checkpoint, data_dir)?;
+    let data_dir = local.root().to_path_buf();
     crate::seed::ensure_seed_policy(&local, &seed_input)?;
 
     // 2. Fetch the startup checkpoint, open the RPC store using its chain identity,
@@ -229,6 +230,7 @@ pub(crate) async fn initialize(
         context,
         subscription_handle,
         indexer_service,
+        data_dir,
         network_name,
         forked_at_checkpoint,
         starting_checkpoint,
@@ -310,33 +312,6 @@ pub(crate) async fn serve(
         });
 
     Ok((rpc_addr, service))
-}
-
-/// Run the forked network until it receives a process termination signal.
-pub async fn run(
-    context: Context,
-    subscription_handle: SubscriptionServiceHandle,
-    indexer_service: Service,
-    rpc_addr: SocketAddr,
-    version: &'static str,
-    registry: Registry,
-) -> Result<()> {
-    let listener = bind(rpc_addr).await?;
-    let (_, server) = serve(
-        Arc::new(context),
-        subscription_handle,
-        listener,
-        version,
-        &registry,
-    )
-    .await?;
-
-    info!("forked network running, waiting for shutdown signal");
-    match server.merge(indexer_service).main().await {
-        Err(ServiceError::Terminated) => Ok(()),
-        Ok(()) => Err(anyhow!("forked network tasks exited unexpectedly")),
-        Err(error) => Err(error.into()),
-    }
 }
 
 /// Replace the validator set in the system state with local validators from the NetworkConfig

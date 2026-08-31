@@ -7,7 +7,6 @@
 
 use std::collections::BTreeMap;
 use std::num::NonZeroUsize;
-use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -17,7 +16,6 @@ use rand::rngs::OsRng;
 use simulacrum::Simulacrum;
 use simulacrum::SimulatorStore;
 use simulacrum::store::in_mem_store::KeyStore;
-use sui_futures::service::Service;
 use sui_rpc_api::proto::sui::rpc::v2::SubscribeCheckpointsRequest;
 use sui_rpc_api::proto::sui::rpc::v2::subscription_service_client::SubscriptionServiceClient;
 use sui_rpc_api::subscription::SubscriptionService;
@@ -27,16 +25,18 @@ use sui_types::object::Object;
 
 use crate::AdvanceCheckpointRequest;
 use crate::AdvanceClockRequest;
+use crate::ForkNode;
 use crate::ForkingServiceClient;
 use crate::GetStatusRequest;
 use crate::context::Context;
 use crate::services::ServiceManager;
 use crate::startup;
+use crate::startup::ForkParts;
 use crate::store::ForkStore;
 
 /// In-process gRPC harness that serves a synthetic fork on an ephemeral port.
 struct ServerHarness {
-    service: Service,
+    node: ForkNode,
     grpc_endpoint: String,
     // Held to keep the metadata and RPC store directory alive for the server lifetime.
     _temp: tempfile::TempDir,
@@ -99,23 +99,35 @@ impl ServerHarness {
         let (context, indexer_service) = Context::new(sim, services, checkpoint_sender, &registry)
             .await
             .expect("service-backed context should initialize");
-        let context = Arc::new(context);
-
         let listener = startup::bind("127.0.0.1:0".parse()?).await?;
-        let (addr, server) =
-            startup::serve(context, subscription_handle, listener, "test", &registry).await?;
-        let service = server.merge(indexer_service);
+        let node = ForkNode::from_parts(
+            ForkParts {
+                context,
+                subscription_handle,
+                indexer_service,
+                data_dir: temp.path().to_path_buf(),
+                network_name: "localnet".to_owned(),
+                forked_at_checkpoint,
+                starting_checkpoint: forked_at_checkpoint,
+                resumed: false,
+            },
+            listener,
+            "test",
+            &registry,
+        )
+        .await?;
+        let grpc_endpoint = format!("http://{}", node.rpc_address());
 
         Ok(Self {
-            service,
-            grpc_endpoint: format!("http://{addr}"),
+            node,
+            grpc_endpoint,
             _temp: temp,
             _gql_server: gql_server,
         })
     }
 
     async fn shutdown(self) -> Result<()> {
-        self.service.shutdown().await.map_err(Into::into)
+        self.node.shutdown().await
     }
 }
 
@@ -130,6 +142,23 @@ async fn shutdown_stops_rpc_server() -> Result<()> {
     harness.shutdown().await?;
 
     assert!(ForkingServiceClient::connect(grpc_endpoint).await.is_err());
+    Ok(())
+}
+
+#[tokio::test]
+async fn in_process_administration_uses_rpc_response_types() -> Result<()> {
+    let harness = ServerHarness::start().await?;
+    let initial = harness.node.status().await?;
+
+    let checkpoint = harness.node.advance_checkpoint().await?;
+    assert_eq!(
+        checkpoint.checkpoint_sequence_number,
+        initial.checkpoint_sequence_number + 1,
+    );
+
+    let clock = harness.node.advance_clock(Duration::from_secs(1)).await?;
+    assert!(!clock.tx_digest.is_empty());
+    assert_eq!(clock.timestamp_ms, initial.timestamp_ms + 1_000);
     Ok(())
 }
 
