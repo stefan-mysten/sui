@@ -11,6 +11,7 @@ use tokio::sync::RwLock;
 use tokio::sync::broadcast;
 
 use simulacrum::Simulacrum;
+use sui_futures::service::Service;
 use sui_types::full_checkpoint_content::Checkpoint;
 use sui_types::messages_checkpoint::CheckpointSequenceNumber;
 
@@ -32,8 +33,7 @@ pub(crate) struct CreatedCheckpointMetadata {
     pub(crate) timestamp_ms: u64,
 }
 
-/// Shared context for the forked network, holding the simulacrum and the service manager running
-/// the embedded indexer.
+/// Shared execution context for the forked network and its opened local services.
 pub struct Context {
     simulacrum: Arc<RwLock<ForkedSimulacrum>>,
     services: ServiceManager,
@@ -41,7 +41,7 @@ pub struct Context {
 }
 
 impl Context {
-    /// Build a `Context` whose Simulacrum is backed by a started [`ServiceManager`].
+    /// Build a context and return the service that owns its embedded indexer.
     ///
     /// Starts the embedded `sui-rpc-store` indexer over `checkpoint_sender` before returning, so
     /// committed local checkpoints get indexed for RPC reads. The indexer's broadcast pipeline owns
@@ -52,16 +52,19 @@ impl Context {
         mut services: ServiceManager,
         checkpoint_sender: broadcast::Sender<Arc<Checkpoint>>,
         registry: &Registry,
-    ) -> Result<Self> {
+    ) -> Result<(Self, Service)> {
         let simulacrum = Arc::new(RwLock::new(simulacrum));
-        services
+        let indexer_service = services
             .start_indexer(simulacrum.clone(), checkpoint_sender, registry)
             .await?;
-        Ok(Self {
-            simulacrum,
-            services,
-            checkpoint_publication_lock: Mutex::new(()),
-        })
+        Ok((
+            Self {
+                simulacrum,
+                services,
+                checkpoint_publication_lock: Mutex::new(()),
+            },
+            indexer_service,
+        ))
     }
 
     pub(crate) fn simulacrum(&self) -> &Arc<RwLock<ForkedSimulacrum>> {
@@ -73,13 +76,6 @@ impl Context {
     #[cfg(test)]
     pub(crate) fn services(&self) -> &ServiceManager {
         &self.services
-    }
-
-    /// Resolve when the embedded rpc-store indexer stops. The server loop uses this as a liveness
-    /// watchdog, so an indexer failure surfaces immediately instead of as a publication timeout on
-    /// the next executed transaction.
-    pub(crate) async fn indexer_stopped(&self) -> anyhow::Result<()> {
-        self.services.indexer_stopped().await
     }
 
     /// Execute `operation`, create a checkpoint afterward, and publish that checkpoint to

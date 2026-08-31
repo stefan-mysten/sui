@@ -19,6 +19,7 @@ use prometheus::Registry;
 use simulacrum::Simulacrum;
 use simulacrum::SimulatorStore;
 use simulacrum::store::in_mem_store::KeyStore;
+use sui_futures::service::Service;
 use sui_swarm_config::network_config::NetworkConfig;
 use sui_swarm_config::network_config_builder::ConfigBuilder;
 use sui_types::SUI_FRAMEWORK_PACKAGE_ID;
@@ -66,6 +67,7 @@ struct TestHarness {
     gas_object: Object,
     reference_gas_price: u64,
     checkpoint_receiver: tokio::sync::broadcast::Receiver<Arc<Checkpoint>>,
+    _indexer_service: Service,
     temp: tempfile::TempDir,
     _gql_server: MockServer,
 }
@@ -131,11 +133,10 @@ impl TestHarness {
         let gas_object = Self::find_gas_coin(&config, sender);
         let registry = Registry::new();
         let (checkpoint_sender, checkpoint_receiver) = tokio::sync::broadcast::channel(4);
-        let context = Arc::new(
-            Context::new(sim, services, checkpoint_sender, &registry)
-                .await
-                .expect("service-backed context should initialize"),
-        );
+        let (context, indexer_service) = Context::new(sim, services, checkpoint_sender, &registry)
+            .await
+            .expect("service-backed context should initialize");
+        let context = Arc::new(context);
         let executor = ForkedTransactionExecutor::new(context.clone());
 
         Self {
@@ -146,6 +147,7 @@ impl TestHarness {
             gas_object,
             reference_gas_price,
             checkpoint_receiver,
+            _indexer_service: indexer_service,
             temp,
             _gql_server: gql_server,
         }
