@@ -16,8 +16,8 @@ use crate::AdvanceClockRequest;
 use crate::DEFAULT_RPC_ADDR;
 use crate::ForkingServiceClient;
 use crate::GetStatusRequest;
-use crate::GraphQLClient;
 use crate::StartArgs;
+use crate::gql::GraphQLClient;
 use crate::seed::SeedInput;
 
 #[derive(Parser)]
