@@ -21,7 +21,7 @@ mod rpc;
 pub(crate) mod seed;
 pub(crate) mod services;
 mod startup;
-pub mod store;
+pub(crate) mod store;
 #[cfg(test)]
 #[path = "tests/support.rs"]
 mod test_support;
@@ -36,8 +36,6 @@ pub use proto::forking::AdvanceClockResponse;
 pub use proto::forking::GetStatusRequest;
 pub use proto::forking::GetStatusResponse;
 pub use proto::forking::forking_service_client::ForkingServiceClient;
-pub use seed::SeedInput;
-pub use store::ForkStore;
 
 use std::net::SocketAddr;
 use std::path::Path;
@@ -56,6 +54,7 @@ use sui_types::messages_checkpoint::CheckpointSequenceNumber;
 use sui_types::sui_system_state::epoch_start_sui_system_state::EpochStartSystemStateTrait as _;
 
 use crate::context::Context;
+use crate::seed::SeedInput;
 use crate::startup::ForkParts;
 
 /// A running forked Sui node with in-process administration and owned background services.
